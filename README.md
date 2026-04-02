@@ -114,3 +114,26 @@ npm run preflight
   - Python 单元测试
   - Web 构建
   - Web 换道回归
+
+## 一键运行（Windows）
+1. PowerShell 一键启动（自动安装依赖 + 构建 + 拉起后端与 Web）：
+```powershell
+.\scripts\run-oneclick.ps1
+```
+
+2. 双击启动（无需手动输命令）：
+```text
+scripts\run-oneclick.bat
+```
+
+3. 停止一键启动拉起的进程：
+```powershell
+.\scripts\stop-oneclick.ps1
+```
+
+4. 常用参数示例：
+```powershell
+.\scripts\run-oneclick.ps1 -SkipInstall -SkipBuild
+.\scripts\run-oneclick.ps1 -Demo -NoDisplay
+.\scripts\run-oneclick.ps1 -WebPort 8081 -WebsocketPort 9876
+```
