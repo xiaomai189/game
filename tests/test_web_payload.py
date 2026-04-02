@@ -33,6 +33,13 @@ def test_build_web_payload_contains_normalized_points() -> None:
         source="camera",
         snapshot=snapshot,
         action_state=action,
+        pipeline={
+            "captureFps": 29.1,
+            "inferFps": 19.2,
+            "renderFps": 30.4,
+            "p95LatencyMs": 142.7,
+            "frameDropRate": 0.0312,
+        },
     )
 
     assert payload["type"] == "frame"
@@ -40,3 +47,4 @@ def test_build_web_payload_contains_normalized_points() -> None:
     assert payload["target"]["x"] == 320
     assert payload["hands"]["leftNorm"] == {"x": 0.1, "y": 0.2}
     assert payload["body"]["centerNorm"] == {"x": 0.3125, "y": 0.2778}
+    assert payload["pipeline"]["inferFps"] == 19.2

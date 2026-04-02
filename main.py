@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -57,6 +58,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show game overlay (target/HUD) in camera window.",
     )
+    parser.add_argument(
+        "--perf-report",
+        type=str,
+        default=None,
+        help="Write runtime performance summary JSON to this path.",
+    )
     return parser.parse_args()
 
 
@@ -107,6 +114,28 @@ def _build_demo_action(snapshot, frame_count: int):
     return state
 
 
+def _resize_for_inference(frame, scale: float, cv2):
+    if scale >= 0.999:
+        return frame, 1.0
+    height, width = frame.shape[:2]
+    resized = cv2.resize(
+        frame,
+        (max(64, int(width * scale)), max(64, int(height * scale))),
+        interpolation=cv2.INTER_LINEAR,
+    )
+    return resized, scale
+
+
+def _rescale_keypoints(keypoints, applied_scale: float):
+    if keypoints is None or applied_scale >= 0.999:
+        return keypoints
+    inv = 1.0 / applied_scale
+    out = keypoints.copy()
+    out[:, 0] *= inv
+    out[:, 1] *= inv
+    return out
+
+
 def main() -> int:
     args = parse_args()
 
@@ -127,7 +156,7 @@ def main() -> int:
     from core.web_bridge import WebGameBridge
     from core.web_payload import build_web_payload
     from core.renderer import RenderInput, Renderer
-    from core.utils import FpsCounter
+    from core.utils import FpsCounter, PipelineStats
 
     settings = load_settings()
 
@@ -150,6 +179,7 @@ def main() -> int:
         move_dead_zone_ratio=settings.move_dead_zone_ratio,
         squat_ratio=settings.squat_ratio,
         swap_left_right=settings.mirror,
+        keypoint_grace_frames=settings.keypoint_grace_frames,
     )
     game_engine = GameEngine(
         frame_width=settings.frame_width,
@@ -166,9 +196,20 @@ def main() -> int:
         keypoint_confidence=settings.keypoint_confidence,
         show_game_overlay=(settings.show_camera_game_overlay or args.show_camera_game_overlay),
     )
-    fps_counter = FpsCounter()
+    capture_fps_counter = FpsCounter()
+    infer_fps_counter = FpsCounter()
+    render_fps_counter = FpsCounter()
+    pipeline_stats = PipelineStats()
+    inference_stride = max(1, int(settings.inference_stride_frames))
+    latency_budget_ms = float(settings.latency_budget_ms)
+    adaptive_resolution_enabled = bool(settings.adaptive_resolution_enabled)
+    drop_stale_frames = bool(settings.drop_stale_frames)
+    downscale_ratio = max(0.4, min(1.0, float(settings.inference_downscale_ratio)))
+    infer_scale = 1.0
     frame_count = 0
     last_screen = None
+    last_keypoints = None
+    last_warning: str | None = None
     ws_bridge: WebGameBridge | None = None
 
     if not args.disable_websocket:
@@ -191,9 +232,11 @@ def main() -> int:
         game_engine.start(now=time.monotonic())
 
         while True:
+            frame_start = time.perf_counter()
             now = time.monotonic()
             if args.demo:
                 frame = _build_demo_frame(settings.frame_width, settings.frame_height, frame_count, cv2)
+                pipeline_stats.record_capture_fps(capture_fps_counter.tick())
                 snapshot_for_action = game_engine.snapshot(now=now)
                 action_state = _build_demo_action(snapshot_for_action, frame_count)
                 keypoints = None
@@ -202,27 +245,46 @@ def main() -> int:
                 ok, frame = camera.read()
                 if not ok or frame is None:
                     continue
-                pose_output = pose_engine.infer(frame)
-                keypoints = pose_output.keypoints
-                warning = pose_output.warning
+                if drop_stale_frames and pipeline_stats.p95_latency_ms() > latency_budget_ms:
+                    ok_latest, latest_frame = camera.read()
+                    if ok_latest and latest_frame is not None:
+                        frame = latest_frame
+                        pipeline_stats.mark_dropped_frame()
+
+                pipeline_stats.record_capture_fps(capture_fps_counter.tick())
+
+                should_infer = pose_engine is not None and (
+                    frame_count % inference_stride == 0 or last_keypoints is None
+                )
+                if should_infer:
+                    if adaptive_resolution_enabled:
+                        p95_ms = pipeline_stats.p95_latency_ms()
+                        if p95_ms > latency_budget_ms * 1.10:
+                            infer_scale = downscale_ratio
+                        elif p95_ms < latency_budget_ms * 0.75:
+                            infer_scale = 1.0
+
+                    infer_frame, applied_scale = _resize_for_inference(frame, infer_scale, cv2)
+                    infer_start = time.perf_counter()
+                    pose_output = pose_engine.infer(infer_frame)
+                    infer_elapsed_ms = (time.perf_counter() - infer_start) * 1000.0
+                    pipeline_stats.record_infer_fps(infer_fps_counter.tick())
+                    keypoints = _rescale_keypoints(pose_output.keypoints, applied_scale)
+                    last_keypoints = keypoints
+                    last_warning = pose_output.warning
+                    if pose_output.warning:
+                        warning = f"{pose_output.warning} | infer_ms={infer_elapsed_ms:.1f} scale={infer_scale:.2f}"
+                    else:
+                        warning = f"infer_ms={infer_elapsed_ms:.1f} scale={infer_scale:.2f}"
+                else:
+                    keypoints = last_keypoints
+                    warning = last_warning
                 action_state = action_engine.infer(keypoints, frame.shape)
 
             game_engine.update(action_state, now=now)
             snapshot = game_engine.snapshot(now=now)
-            fps = fps_counter.tick()
-
-            if ws_bridge is not None:
-                ws_bridge.publish(
-                    build_web_payload(
-                        now=now,
-                        frame_width=frame.shape[1],
-                        frame_height=frame.shape[0],
-                        fps=fps,
-                        source="demo" if args.demo else "camera",
-                        snapshot=snapshot,
-                        action_state=action_state,
-                    )
-                )
+            fps = render_fps_counter.tick()
+            pipeline_stats.record_render_fps(fps)
 
             screen = renderer.render(
                 RenderInput(
@@ -234,7 +296,22 @@ def main() -> int:
                     warning=warning,
                 )
             )
+            pipeline_stats.record_latency_ms((time.perf_counter() - frame_start) * 1000.0)
             last_screen = screen
+
+            if ws_bridge is not None:
+                ws_bridge.publish(
+                    build_web_payload(
+                        now=now,
+                        frame_width=frame.shape[1],
+                        frame_height=frame.shape[0],
+                        fps=fps,
+                        source="demo" if args.demo else "camera",
+                        snapshot=snapshot,
+                        action_state=action_state,
+                        pipeline=pipeline_stats.snapshot(),
+                    )
+                )
 
             if not args.no_display:
                 cv2.imshow("YOLO Pose Game Prototype", screen)
@@ -263,6 +340,20 @@ def main() -> int:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(output_path), last_screen)
             print(f"Preview saved to: {output_path}")
+        if args.perf_report:
+            report_path = Path(args.perf_report)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report = {
+                "source": "demo" if args.demo else "camera",
+                "framesProcessed": frame_count,
+                "inferenceStrideFrames": inference_stride,
+                "adaptiveResolutionEnabled": adaptive_resolution_enabled,
+                "inferenceScaleFinal": round(infer_scale, 2),
+                "latencyBudgetMs": round(latency_budget_ms, 2),
+                "metrics": pipeline_stats.snapshot(),
+            }
+            report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(f"Perf report saved to: {report_path}")
         cv2.destroyAllWindows()
     return 0
 

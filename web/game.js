@@ -22,7 +22,9 @@ const speedGainPerScore = 1.2;
 const spawnMsBase = 1150;
 const spawnMsDrop = 250;
 const runnerDuration = 45;
-const centerCommitMs = 50;
+const centerCommitMs = 30;
+const laneSwitchLockMs = 70;
+const streamFreezeMs = 300;
 
 const state = {
   connected: false,
@@ -42,8 +44,10 @@ const state = {
   runner: {
     status: "READY",
     lane: 1,
+    intentLane: "hold",
     centerIntentSince: 0,
     switchFxUntil: 0,
+    switchLockUntil: 0,
     score: 0,
     timeLeftSec: 45,
     shieldUntil: 0,
@@ -88,6 +92,13 @@ function statusText(status) {
   return "已结束";
 }
 
+function laneIntentLabel(desiredLane) {
+  if (desiredLane === 0) return "left";
+  if (desiredLane === 1) return "center";
+  if (desiredLane === 2) return "right";
+  return "hold";
+}
+
 function updateControlButtons() {
   const status = state.runner.status;
   btnStart.disabled = status === "RUNNING" || status === "PAUSED";
@@ -110,13 +121,18 @@ function resolveDesiredLane(payload) {
   return null;
 }
 
-function applyLaneImmediately(desiredLane) {
-  const now = getNow();
+function applyLaneImmediately(desiredLane, now = getNow()) {
   const runner = state.runner;
+  runner.intentLane = laneIntentLabel(desiredLane);
   if (desiredLane == null) return;
 
+  const sideLaneInput = desiredLane === 0 || desiredLane === 2;
+  if (sideLaneInput && now < runner.switchLockUntil && desiredLane !== runner.lane) {
+    return;
+  }
+
   const lastLane = runner.lane;
-  if (desiredLane === 0 || desiredLane === 2) {
+  if (sideLaneInput) {
     runner.centerIntentSince = 0;
     runner.lane = desiredLane;
   } else if (desiredLane === 1) {
@@ -132,6 +148,11 @@ function applyLaneImmediately(desiredLane) {
 
   if (runner.lane !== lastLane) {
     runner.switchFxUntil = now + 180;
+    if (runner.lane === 0 || runner.lane === 2) {
+      runner.switchLockUntil = now + laneSwitchLockMs;
+    } else {
+      runner.switchLockUntil = 0;
+    }
   }
 }
 
@@ -142,8 +163,10 @@ function resetRunner(now) {
   state.runner.obstacles = [];
   state.runner.spawnAt = now + 300;
   state.runner.lastStepAt = now;
+  state.runner.intentLane = "hold";
   state.runner.centerIntentSince = 0;
   state.runner.switchFxUntil = 0;
+  state.runner.switchLockUntil = 0;
 }
 
 function startGame() {
@@ -185,17 +208,24 @@ function connect() {
     try {
       const payload = JSON.parse(e.data);
       if (payload.type !== "frame") return;
-      state.lastPayloadTs = getNow();
+      const now = getNow();
+      const staleBeforeMs = state.lastPayloadTs === 0 ? 0 : now - state.lastPayloadTs;
       state.py = payload;
-      onPose(payload);
+      onPose(payload, now, staleBeforeMs);
+      state.lastPayloadTs = now;
     } catch {
       // ignore malformed packets
     }
   };
 }
 
-function onPose(payload) {
-  applyLaneImmediately(resolveDesiredLane(payload));
+function onPose(payload, now = getNow(), staleBeforeMs = 0) {
+  if (staleBeforeMs > streamFreezeMs) {
+    state.runner.intentLane = "hold";
+    state.runner.centerIntentSince = 0;
+    return;
+  }
+  applyLaneImmediately(resolveDesiredLane(payload), now);
 }
 
 function spawnObstacle(now) {
@@ -556,6 +586,11 @@ function animationLoop(now) {
 function renderGameToText() {
   const now = getNow();
   const connectionStaleMs = Math.max(0, now - state.lastPayloadTs);
+  const switchLockMsLeft = Math.max(0, state.runner.switchLockUntil - now);
+  const centerCommitMsLeft =
+    state.runner.centerIntentSince > 0
+      ? Math.max(0, centerCommitMs - (now - state.runner.centerIntentSince))
+      : 0;
   const payload = {
     coordinateSystem: {
       origin: "top-left",
@@ -582,11 +617,30 @@ function renderGameToText() {
       connected: state.connected,
       staleMs: Number(connectionStaleMs.toFixed(1)),
     },
+    control: {
+      intentLane: state.runner.intentLane,
+      switchLockMsLeft: Number(switchLockMsLeft.toFixed(1)),
+      centerCommitMsLeft: Number(centerCommitMsLeft.toFixed(1)),
+    },
   };
   return JSON.stringify(payload);
 }
 
 window.render_game_to_text = renderGameToText;
+window.inject_pose_payload = (actions = {}, options = {}) => {
+  const now = getNow();
+  const staleBeforeMs = typeof options.staleBeforeMs === "number" ? options.staleBeforeMs : 0;
+  const payload = {
+    type: "frame",
+    actions: {
+      leftHandUp: Boolean(actions.leftHandUp),
+      rightHandUp: Boolean(actions.rightHandUp),
+    },
+  };
+  onPose(payload, now, staleBeforeMs);
+  state.lastPayloadTs = now;
+  return renderGameToText();
+};
 window.advanceTime = (ms) => {
   const steps = Math.max(1, Math.round(ms / (1000 / 60)));
   let now = getNow();

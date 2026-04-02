@@ -12,6 +12,12 @@ class Settings:
     model_device: str = "cpu"
     model_confidence: float = 0.5
     keypoint_confidence: float = 0.35
+    keypoint_grace_frames: int = 2
+    inference_stride_frames: int = 1
+    drop_stale_frames: bool = True
+    adaptive_resolution_enabled: bool = True
+    latency_budget_ms: float = 180.0
+    inference_downscale_ratio: float = 0.75
     debug: bool = True
     target_radius: int = 60
     target_spawn_interval_sec: float = 2.5

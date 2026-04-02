@@ -1,0 +1,232 @@
+{
+  "generatedAt": "2026-04-02T17:12:41.568Z",
+  "checks": {
+    "leftImmediateLane": "left",
+    "reverseBlockedLane": "left",
+    "reverseAfterLockLane": "right",
+    "center20msLane": "right",
+    "center35msLane": "middle",
+    "staleFreezeLane": "left",
+    "staleFreezeIntent": "hold"
+  },
+  "passed": true,
+  "records": [
+    {
+      "step": "start",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 1,
+        "laneLabel": "middle",
+        "score": 0,
+        "timeLeftSec": 45,
+        "shieldActive": false,
+        "player": {
+          "x": 640,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 73
+        },
+        "control": {
+          "intentLane": "hold",
+          "switchLockMsLeft": 0,
+          "centerCommitMsLeft": 0
+        }
+      }
+    },
+    {
+      "step": "left_immediate",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 0,
+        "laneLabel": "left",
+        "score": 0,
+        "timeLeftSec": 44.98,
+        "shieldActive": false,
+        "player": {
+          "x": 340,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 0
+        },
+        "control": {
+          "intentLane": "left",
+          "switchLockMsLeft": 70,
+          "centerCommitMsLeft": 0
+        }
+      }
+    },
+    {
+      "step": "reverse_blocked_within_lock",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 0,
+        "laneLabel": "left",
+        "score": 0,
+        "timeLeftSec": 44.98,
+        "shieldActive": false,
+        "player": {
+          "x": 340,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 0
+        },
+        "control": {
+          "intentLane": "right",
+          "switchLockMsLeft": 70,
+          "centerCommitMsLeft": 0
+        }
+      }
+    },
+    {
+      "step": "reverse_after_lock_elapsed",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 2,
+        "laneLabel": "right",
+        "score": 0,
+        "timeLeftSec": 44.9,
+        "shieldActive": false,
+        "player": {
+          "x": 940,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 0
+        },
+        "control": {
+          "intentLane": "right",
+          "switchLockMsLeft": 70,
+          "centerCommitMsLeft": 0
+        }
+      }
+    },
+    {
+      "step": "center_not_ready_20ms",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 2,
+        "laneLabel": "right",
+        "score": 0,
+        "timeLeftSec": 44.95,
+        "shieldActive": false,
+        "player": {
+          "x": 940,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 16.7
+        },
+        "control": {
+          "intentLane": "center",
+          "switchLockMsLeft": 120.1,
+          "centerCommitMsLeft": 13.3
+        }
+      }
+    },
+    {
+      "step": "center_committed_35ms",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 1,
+        "laneLabel": "middle",
+        "score": 0,
+        "timeLeftSec": 44.93,
+        "shieldActive": false,
+        "player": {
+          "x": 640,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 0
+        },
+        "control": {
+          "intentLane": "center",
+          "switchLockMsLeft": 0,
+          "centerCommitMsLeft": 0
+        }
+      }
+    },
+    {
+      "step": "stale_freeze_holds_lane",
+      "state": {
+        "coordinateSystem": {
+          "origin": "top-left",
+          "xAxis": "right-positive",
+          "yAxis": "down-positive",
+          "unit": "pixel"
+        },
+        "mode": "RUNNING",
+        "laneIndex": 0,
+        "laneLabel": "left",
+        "score": 0,
+        "timeLeftSec": 44.85,
+        "shieldActive": false,
+        "player": {
+          "x": 340,
+          "y": 568
+        },
+        "obstacles": [],
+        "stream": {
+          "connected": false,
+          "staleMs": 0
+        },
+        "control": {
+          "intentLane": "hold",
+          "switchLockMsLeft": 70,
+          "centerCommitMsLeft": 0
+        }
+      }
+    }
+  ]
+}

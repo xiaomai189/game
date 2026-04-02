@@ -5,7 +5,9 @@
   "description": "Web UI mini game driven by YOLO pose events",
   "scripts": {
     "build": "node scripts/build-web.mjs",
-    "serve:web": "python -m http.server 8080 -d web"
+    "serve:web": "python -m http.server 8080 -d web",
+    "test:web-gesture": "node scripts/test-web-gesture-state.mjs",
+    "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
     "playwright": "^1.59.1"

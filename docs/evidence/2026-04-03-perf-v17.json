@@ -1,0 +1,15 @@
+{
+  "source": "demo",
+  "framesProcessed": 300,
+  "inferenceStrideFrames": 1,
+  "adaptiveResolutionEnabled": true,
+  "inferenceScaleFinal": 1.0,
+  "latencyBudgetMs": 180.0,
+  "metrics": {
+    "captureFps": 382.99,
+    "inferFps": 0.0,
+    "renderFps": 383.63,
+    "p95LatencyMs": 3.33,
+    "frameDropRate": 0.0
+  }
+}

@@ -62,6 +62,13 @@ pytest -q
 - `--websocket-port`：Web 游戏桥接端口（默认 `8765`）
 - `--disable-websocket`：关闭 WebSocket 输出
 - `--show-camera-game-overlay`：在摄像头窗口显示游戏叠加（默认关闭）
+- `--perf-report`：导出本次运行性能报告（JSON）
+
+性能采样示例（无摄像头 Demo）：
+```powershell
+python main.py --demo --no-display --max-frames 300 --disable-websocket --perf-report docs/evidence/perf-sample.json
+```
+报告包含 `captureFps`、`inferFps`、`renderFps`、`p95LatencyMs`、`frameDropRate`。
 
 ## Web 跑酷 P1（网页界面）
 1. 启动姿态服务（建议保留摄像头窗口，便于按键重开）：
@@ -82,6 +89,27 @@ http://127.0.0.1:8080
 4. 操作方式：
 - 进入页面后点击 `启动` 开始；可用 `暂停`/`继续` 控制节奏，`重开` 可立即重置并开新局。
 - 抬左手切到左道，抬右手切到右道，双手不抬回到中道。
-- 当前换道为即时切换（无防抖）。
+- 左右切道即时生效；双手不抬时约 `30ms` 后回中。
+- 侧向切道后会有约 `70ms` 的反向锁定窗口，减少左右抖动反复跳道。
+- 姿态流中断（约 `300ms`）期间会冻结换道输入，保持当前道位。
 - 镜像模式下已做左右手语义校正（按你的体感方向判定左右手）。
 - 躲避从上方下落障碍；下蹲可触发短时护盾，允许“穿一次错误通道”。
+
+5. Web 换道回归测试：
+```powershell
+npm run test:web-gesture
+```
+该命令会自动启动本地静态服务并执行 Playwright 关键路径断言。
+
+6. 一键预检（提交前建议）：
+```powershell
+npm run preflight
+```
+该命令会顺序执行 `pytest -q`、`npm run build`、`npm run test:web-gesture`。
+
+## CI 门禁
+- 已提供 GitHub Actions 工作流：`.github/workflows/ci.yml`
+- 触发后会执行与本地预检一致的三项检查：
+  - Python 单元测试
+  - Web 构建
+  - Web 换道回归

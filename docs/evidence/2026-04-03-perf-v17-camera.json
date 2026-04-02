@@ -1,0 +1,15 @@
+{
+  "source": "camera",
+  "framesProcessed": 120,
+  "inferenceStrideFrames": 1,
+  "adaptiveResolutionEnabled": true,
+  "inferenceScaleFinal": 0.75,
+  "latencyBudgetMs": 180.0,
+  "metrics": {
+    "captureFps": 9.4,
+    "inferFps": 10.23,
+    "renderFps": 10.23,
+    "p95LatencyMs": 140.83,
+    "frameDropRate": 0.0083
+  }
+}

@@ -37,17 +37,19 @@ class ActionEngine:
         move_dead_zone_ratio: float = 0.12,
         squat_ratio: float = 0.06,
         swap_left_right: bool = False,
+        keypoint_grace_frames: int = 2,
     ) -> None:
         self.keypoint_confidence = keypoint_confidence
         self.arm_raise_ratio = arm_raise_ratio
         self.move_dead_zone_ratio = move_dead_zone_ratio
         self.squat_ratio = squat_ratio
         self.swap_left_right = swap_left_right
+        self.keypoint_grace_frames = max(0, int(keypoint_grace_frames))
+        self._last_valid_points: dict[int, tuple[float, float] | None] = {}
+        self._missing_counts: dict[int, int] = {}
 
     def infer(self, keypoints: np.ndarray | None, frame_shape: tuple[int, int, int]) -> ActionState:
         state = ActionState()
-        if keypoints is None or keypoints.shape[0] < 15:
-            return state
 
         height, width = frame_shape[:2]
         arm_threshold = height * self.arm_raise_ratio
@@ -55,10 +57,22 @@ class ActionEngine:
         squat_threshold = height * self.squat_ratio
 
         def point(index: int) -> tuple[float, float] | None:
-            x, y, conf = keypoints[index]
-            if conf < self.keypoint_confidence:
-                return None
-            return float(x), float(y)
+            if keypoints is not None and keypoints.shape[0] > index:
+                x, y, conf = keypoints[index]
+                if conf >= self.keypoint_confidence:
+                    p = (float(x), float(y))
+                    self._last_valid_points[index] = p
+                    self._missing_counts[index] = 0
+                    return p
+
+            miss = self._missing_counts.get(index, 0) + 1
+            self._missing_counts[index] = miss
+            previous = self._last_valid_points.get(index)
+            if previous is not None and miss <= self.keypoint_grace_frames:
+                return previous
+
+            self._last_valid_points[index] = None
+            return None
 
         left_wrist = point(LEFT_WRIST)
         right_wrist = point(RIGHT_WRIST)

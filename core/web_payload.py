@@ -32,6 +32,7 @@ def build_web_payload(
     source: str,
     snapshot: GameSnapshot,
     action_state: ActionState,
+    pipeline: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     left = _point(action_state.left_hand)
     right = _point(action_state.right_hand)
@@ -70,4 +71,6 @@ def build_web_payload(
             "centerNorm": _norm(action_state.body_center, frame_width, frame_height),
         },
     }
+    if pipeline is not None:
+        payload["pipeline"] = pipeline
     return payload
