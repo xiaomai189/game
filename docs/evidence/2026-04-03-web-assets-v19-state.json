@@ -1,0 +1,44 @@
+{
+  "coordinateSystem": {
+    "origin": "top-left",
+    "xAxis": "right-positive",
+    "yAxis": "down-positive",
+    "unit": "pixel"
+  },
+  "mode": "RUNNING",
+  "laneIndex": 2,
+  "laneLabel": "right",
+  "score": 0,
+  "timeLeftSec": 44.88,
+  "shieldActive": false,
+  "player": {
+    "x": 940,
+    "y": 568
+  },
+  "obstacles": [
+    {
+      "y": -144,
+      "safeLane": 1,
+      "checked": false
+    }
+  ],
+  "stream": {
+    "connected": true,
+    "staleMs": 0
+  },
+  "control": {
+    "intentLane": "center",
+    "switchLockMsLeft": 69.9,
+    "centerCommitMsLeft": 146.5
+  },
+  "visual": {
+    "fxQuality": "high",
+    "renderMode": "asset-first",
+    "assetsLoaded": true,
+    "assetTheme": "neon",
+    "assetFallbackEnabled": true,
+    "assetFallbackReason": null,
+    "trailCount": 16,
+    "particleCount": 27
+  }
+}

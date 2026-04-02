@@ -34,6 +34,25 @@ const maxTrailHigh = 16;
 const maxTrailLow = 7;
 const maxExhaustHigh = 42;
 const maxExhaustLow = 16;
+const assetParallaxFar = 0.12;
+const assetParallaxMid = 0.28;
+const assetParallaxNear = 0.55;
+
+const assetCatalog = {
+  player: "./assets/images/web-runner/player-jet.svg",
+  gateDanger: "./assets/images/web-runner/gate-danger.svg",
+  gateSafe: "./assets/images/web-runner/gate-safe.svg",
+  bgFar: "./assets/images/web-runner/bg-far.svg",
+  bgMid: "./assets/images/web-runner/bg-mid.svg",
+  bgNear: "./assets/images/web-runner/bg-near.svg",
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+const visualConfig = {
+  assetTheme: urlParams.get("assetTheme") || "neon",
+  assetScale: clamp(Number(urlParams.get("assetScale") || 1), 0.6, 1.4),
+  assetFallbackEnabled: (urlParams.get("assetFallbackEnabled") || "true") !== "false",
+};
 
 const state = {
   connected: false,
@@ -71,11 +90,17 @@ const state = {
     lowFpsStreak: 0,
     recoverFpsStreak: 0,
     localFps: 60,
+    renderMode: "procedural-fallback",
+    assetsLoaded: false,
+    assetFallbackReason: "assets-not-initialized",
+    assetTheme: visualConfig.assetTheme,
+    assetScale: visualConfig.assetScale,
     skyline: [],
     particles: [],
     trails: [],
     exhaust: [],
     lastBgAt: 0,
+    worldOffset: 0,
   },
 };
 
@@ -89,6 +114,45 @@ function clamp(v, min, max) {
 
 function randomRange(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function makeAssetRegistry() {
+  return {
+    player: null,
+    gateDanger: null,
+    gateSafe: null,
+    bgFar: null,
+    bgMid: null,
+    bgNear: null,
+  };
+}
+
+const loadedAssets = makeAssetRegistry();
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    image.src = url;
+  });
+}
+
+async function preloadAssets() {
+  try {
+    const entries = Object.entries(assetCatalog);
+    for (const [key, url] of entries) {
+      // eslint-disable-next-line no-await-in-loop
+      loadedAssets[key] = await loadImage(url);
+    }
+    state.visual.assetsLoaded = true;
+    state.visual.assetFallbackReason = null;
+    state.visual.renderMode = "asset-first";
+  } catch (error) {
+    state.visual.assetsLoaded = false;
+    state.visual.renderMode = visualConfig.assetFallbackEnabled ? "procedural-fallback" : "asset-first";
+    state.visual.assetFallbackReason = String(error?.message || "asset-load-failed");
+  }
 }
 
 function getRunnerSpeed() {
@@ -444,6 +508,11 @@ function drawBackground(now) {
   initVisuals();
   updateParticles(now);
 
+  if (canUseAssetMode()) {
+    drawBackgroundAsset(now);
+    return;
+  }
+
   const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
   sky.addColorStop(0, "#1f1b47");
   sky.addColorStop(0.5, "#182f63");
@@ -554,59 +623,133 @@ function drawExhaust(now) {
   visual.exhaust = next;
 }
 
+function canUseAssetMode() {
+  return state.visual.renderMode === "asset-first";
+}
+
+function drawLayerTiled(image, offsetX, y, scale = 1) {
+  if (!image) return;
+  const drawHeight = canvas.height * scale;
+  const ratio = image.width > 0 ? image.width / image.height : 1;
+  const tileWidth = drawHeight * ratio;
+  if (tileWidth <= 2) return;
+  let x = -((offsetX % tileWidth) + tileWidth);
+  while (x < canvas.width + tileWidth) {
+    ctx.drawImage(image, x, y, tileWidth, drawHeight);
+    x += tileWidth;
+  }
+}
+
+function drawBackgroundAsset(now) {
+  const visual = state.visual;
+  const speed = getRunnerSpeed();
+  visual.worldOffset += speed * 0.0035;
+
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, "#181a3f");
+  sky.addColorStop(0.5, "#182f63");
+  sky.addColorStop(1, "#07142f");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawLayerTiled(loadedAssets.bgFar, visual.worldOffset * assetParallaxFar, 0, 1);
+  drawLayerTiled(loadedAssets.bgMid, visual.worldOffset * assetParallaxMid, canvas.height * 0.08, 0.9);
+  drawLayerTiled(loadedAssets.bgNear, visual.worldOffset * assetParallaxNear, canvas.height * 0.24, 0.76);
+}
+
+function drawPlayerAsset(now) {
+  const image = loadedAssets.player;
+  if (!image) return false;
+  const speedN = speedNormalized();
+  const x = lanes[state.runner.lane];
+  const y = playerY;
+  const jitter = Math.sin(now * (0.017 + speedN * 0.011)) * (2.2 + speedN * 1.8);
+  const tilt = speedN * 0.2;
+  const baseW = 138 * state.visual.assetScale;
+  const baseH = 98 * state.visual.assetScale;
+  const w = baseW * (1 + speedN * 0.08);
+  const h = baseH * (1 + speedN * 0.08);
+
+  ctx.save();
+  ctx.translate(x, y + jitter);
+  ctx.rotate(tilt);
+  ctx.globalAlpha = 0.96;
+  ctx.drawImage(image, -w / 2, -h / 2 - 8, w, h);
+  ctx.restore();
+  return true;
+}
+
+function drawGateAsset(image, laneX, y, appear, now, safe) {
+  if (!image) return false;
+  const wobble = safe ? Math.sin(now * 0.012) * 2 : Math.sin(now * 0.018) * 1.5;
+  const scale = (0.9 + appear * 0.1) * state.visual.assetScale;
+  const w = laneBlockWidth * scale;
+  const h = laneBlockHeight * scale;
+  ctx.save();
+  ctx.globalAlpha = 0.4 + appear * 0.6;
+  ctx.drawImage(image, laneX - w / 2, y - h / 2 + wobble, w, h);
+  ctx.restore();
+  return true;
+}
+
 function drawPlayer(now) {
   const lane = state.runner.lane;
   const x = lanes[lane];
   const shield = now <= state.runner.shieldUntil;
   const speedN = speedNormalized();
+  const useAsset = canUseAssetMode();
+  const fallbackAllowed = !useAsset || visualConfig.assetFallbackEnabled;
+  const usedAsset = useAsset && drawPlayerAsset(now);
 
   ctx.fillStyle = "rgba(32,44,98,0.56)";
   ctx.beginPath();
   ctx.ellipse(x, playerY + 24, 78 + speedN * 16, 16 + speedN * 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const jitter = Math.sin(now * (0.017 + speedN * 0.011)) * (2.6 + speedN * 2.2);
-  const tilt = speedN * 0.16;
-  ctx.save();
-  ctx.translate(x, playerY + jitter);
-  ctx.rotate(tilt);
+  if (!usedAsset && fallbackAllowed) {
+    const jitter = Math.sin(now * (0.017 + speedN * 0.011)) * (2.6 + speedN * 2.2);
+    const tilt = speedN * 0.16;
+    ctx.save();
+    ctx.translate(x, playerY + jitter);
+    ctx.rotate(tilt);
 
-  ctx.fillStyle = "#1f2f70";
-  ctx.beginPath();
-  ctx.moveTo(-48, 6);
-  ctx.lineTo(-22, -30);
-  ctx.lineTo(22, -30);
-  ctx.lineTo(48, 6);
-  ctx.lineTo(0, 24);
-  ctx.closePath();
-  ctx.fill();
+    ctx.fillStyle = "#1f2f70";
+    ctx.beginPath();
+    ctx.moveTo(-48, 6);
+    ctx.lineTo(-22, -30);
+    ctx.lineTo(22, -30);
+    ctx.lineTo(48, 6);
+    ctx.lineTo(0, 24);
+    ctx.closePath();
+    ctx.fill();
 
-  const bodyGrad = ctx.createLinearGradient(-40, -24, 40, 20);
-  bodyGrad.addColorStop(0, "#56f6ff");
-  bodyGrad.addColorStop(1, "#ff6ac1");
-  ctx.fillStyle = bodyGrad;
-  ctx.beginPath();
-  ctx.moveTo(-34, 0);
-  ctx.lineTo(-11, -22);
-  ctx.lineTo(11, -22);
-  ctx.lineTo(34, 0);
-  ctx.lineTo(0, 13);
-  ctx.closePath();
-  ctx.fill();
+    const bodyGrad = ctx.createLinearGradient(-40, -24, 40, 20);
+    bodyGrad.addColorStop(0, "#56f6ff");
+    bodyGrad.addColorStop(1, "#ff6ac1");
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(-34, 0);
+    ctx.lineTo(-11, -22);
+    ctx.lineTo(11, -22);
+    ctx.lineTo(34, 0);
+    ctx.lineTo(0, 13);
+    ctx.closePath();
+    ctx.fill();
 
-  ctx.fillStyle = "#c5f8ff";
-  ctx.beginPath();
-  ctx.ellipse(0, -6, 10, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
+    ctx.fillStyle = "#c5f8ff";
+    ctx.beginPath();
+    ctx.ellipse(0, -6, 10, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-  ctx.fillStyle = "rgba(255,176,94,0.9)";
-  ctx.beginPath();
-  ctx.moveTo(-10, 12);
-  ctx.lineTo(0, 34 + Math.sin(now * (0.022 + speedN * 0.012)) * (4 + speedN * 2));
-  ctx.lineTo(10, 12);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+    ctx.fillStyle = "rgba(255,176,94,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(-10, 12);
+    ctx.lineTo(0, 34 + Math.sin(now * (0.022 + speedN * 0.012)) * (4 + speedN * 2));
+    ctx.lineTo(10, 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (now <= state.runner.switchFxUntil) {
     const t = (state.runner.switchFxUntil - now) / 180;
@@ -698,11 +841,19 @@ function drawSafePortal(laneX, y, now, appear) {
 
 function drawObstacle(obs, now) {
   const appear = clamp((now - (obs.bornAt ?? now)) / 260, 0, 1);
+  const useAsset = canUseAssetMode();
+  const fallbackAllowed = !useAsset || visualConfig.assetFallbackEnabled;
   for (let i = 0; i < 3; i += 1) {
     if (i === obs.safeLane) continue;
-    drawBlockedGate(lanes[i], obs.y, obs.seed, now, appear);
+    if (!useAsset || !drawGateAsset(loadedAssets.gateDanger, lanes[i], obs.y, appear, now, false)) {
+      if (!fallbackAllowed) continue;
+      drawBlockedGate(lanes[i], obs.y, obs.seed, now, appear);
+    }
   }
-  drawSafePortal(lanes[obs.safeLane], obs.y, now, appear);
+  if (!useAsset || !drawGateAsset(loadedAssets.gateSafe, lanes[obs.safeLane], obs.y, appear, now, true)) {
+    if (!fallbackAllowed) return;
+    drawSafePortal(lanes[obs.safeLane], obs.y, now, appear);
+  }
 }
 
 function drawOverlay(now) {
@@ -827,6 +978,11 @@ function renderGameToText() {
     },
     visual: {
       fxQuality: state.visual.fxQuality,
+      renderMode: state.visual.renderMode,
+      assetsLoaded: state.visual.assetsLoaded,
+      assetTheme: state.visual.assetTheme,
+      assetFallbackEnabled: visualConfig.assetFallbackEnabled,
+      assetFallbackReason: state.visual.assetFallbackReason,
       trailCount: state.visual.trails.length,
       particleCount: state.visual.exhaust.length,
     },
@@ -879,6 +1035,7 @@ btnPause.addEventListener("click", pauseGame);
 btnResume.addEventListener("click", resumeGame);
 btnRestart.addEventListener("click", restartGame);
 
+preloadAssets();
 connect();
 updateControlButtons();
 requestAnimationFrame(animationLoop);
