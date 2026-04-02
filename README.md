@@ -137,3 +137,21 @@ scripts\run-oneclick.bat
 .\scripts\run-oneclick.ps1 -Demo -NoDisplay
 .\scripts\run-oneclick.ps1 -WebPort 8081 -WebsocketPort 9876
 ```
+
+## v21 训练玩法模式（不影响旧玩法）
+- 默认仍为 `classic`（兼容旧运行逻辑）。
+- 可通过 URL 切换模式：
+```text
+http://127.0.0.1:8080/?mode=sprint_lane
+http://127.0.0.1:8080/?mode=squat_gate
+http://127.0.0.1:8080/?mode=reaction_drill
+```
+- 运行中快捷键切换：
+  - `0` -> `classic`
+  - `1` -> `sprint_lane`
+  - `2` -> `squat_gate`
+  - `3` -> `reaction_drill`
+- 新增模式回归测试：
+```powershell
+npm run test:web-workout
+```

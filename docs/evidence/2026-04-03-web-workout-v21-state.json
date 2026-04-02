@@ -1,0 +1,79 @@
+{
+  "coordinateSystem": {
+    "origin": "top-left",
+    "xAxis": "right-positive",
+    "yAxis": "down-positive",
+    "unit": "pixel"
+  },
+  "mode": "RUNNING",
+  "workoutMode": "squat_gate",
+  "laneIndex": 1,
+  "laneLabel": "middle",
+  "score": 36,
+  "timeLeftSec": 179.99,
+  "hp": 3,
+  "maxHp": 3,
+  "combo": 14,
+  "comboMultiplier": 1,
+  "shieldActive": true,
+  "player": {
+    "x": 640,
+    "y": 568
+  },
+  "obstacles": [
+    {
+      "y": -3032.9,
+      "kind": "squat_gate",
+      "checked": true
+    },
+    {
+      "y": -3260,
+      "kind": "squat_gate",
+      "checked": true
+    },
+    {
+      "y": -3489.5,
+      "kind": "squat_gate",
+      "checked": false
+    },
+    {
+      "y": -3722.6,
+      "kind": "squat_gate",
+      "checked": false
+    }
+  ],
+  "stream": {
+    "connected": false,
+    "staleMs": 0
+  },
+  "control": {
+    "intentLane": "center",
+    "switchLockMsLeft": 0,
+    "centerCommitMsLeft": 0
+  },
+  "training": {
+    "intervalPhase": "sprint",
+    "intervalSecLeft": 19.99,
+    "reactionTarget": null,
+    "reactionDeadlineMs": 0,
+    "reactionHighSpeedLeftMs": 0
+  },
+  "stats": {
+    "actionsTotal": 0,
+    "actionsCorrect": 0,
+    "reactionHits": 0,
+    "reactionAvgMs": 0,
+    "fastHits": 0,
+    "maxCombo": 14
+  },
+  "visual": {
+    "fxQuality": "high",
+    "renderMode": "procedural-fallback",
+    "assetsLoaded": false,
+    "assetTheme": "neon",
+    "assetFallbackEnabled": true,
+    "assetFallbackReason": "assets-not-initialized",
+    "trailCount": 15,
+    "particleCount": 28
+  }
+}

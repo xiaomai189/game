@@ -22,6 +22,8 @@ const speedGainPerScore = 1.2;
 const spawnMsBase = 1150;
 const spawnMsDrop = 250;
 const runnerDuration = 45;
+const workoutDuration = 180;
+const workoutMaxHp = 3;
 const centerCommitMs = 30;
 const laneSwitchLockMs = 70;
 const streamFreezeMs = 300;
@@ -37,6 +39,34 @@ const maxExhaustLow = 16;
 const assetParallaxFar = 0.12;
 const assetParallaxMid = 0.28;
 const assetParallaxNear = 0.55;
+const intervalSprintSec = 20;
+const intervalRecoverSec = 10;
+const intervalCycleSec = intervalSprintSec + intervalRecoverSec;
+const reactionWindowMsDefault = 900;
+const reactionWindowMsFast = 700;
+const reactionFastBonusMs = 400;
+const reactionHighSpeedMs = 5000;
+
+const WORKOUT_MODES = {
+  CLASSIC: "classic",
+  SPRINT_LANE: "sprint_lane",
+  SQUAT_GATE: "squat_gate",
+  REACTION_DRILL: "reaction_drill",
+};
+
+const MODE_LABELS = {
+  [WORKOUT_MODES.CLASSIC]: "Classic",
+  [WORKOUT_MODES.SPRINT_LANE]: "Sprint Lane",
+  [WORKOUT_MODES.SQUAT_GATE]: "Squat Gate",
+  [WORKOUT_MODES.REACTION_DRILL]: "Reaction Drill",
+};
+
+const REACTION_TARGETS = [
+  { key: "leftHandUp", label: "LEFT HAND", weight: 0.3 },
+  { key: "rightHandUp", label: "RIGHT HAND", weight: 0.3 },
+  { key: "squat", label: "SQUAT", weight: 0.25 },
+  { key: "neutral", label: "HOLD CENTER", weight: 0.15 },
+];
 
 const assetCatalog = {
   player: "./assets/images/web-runner/player-jet.svg",
@@ -52,6 +82,21 @@ const visualConfig = {
   assetTheme: urlParams.get("assetTheme") || "neon",
   assetScale: clamp(Number(urlParams.get("assetScale") || 1), 0.6, 1.4),
   assetFallbackEnabled: (urlParams.get("assetFallbackEnabled") || "true") !== "false",
+};
+
+function normalizeMode(mode) {
+  if (typeof mode !== "string") return WORKOUT_MODES.SPRINT_LANE;
+  const candidate = mode.trim().toLowerCase();
+  if (Object.values(WORKOUT_MODES).includes(candidate)) return candidate;
+  return WORKOUT_MODES.SPRINT_LANE;
+}
+
+function isWorkoutMode(mode) {
+  return mode !== WORKOUT_MODES.CLASSIC;
+}
+
+const runnerConfig = {
+  defaultMode: normalizeMode(urlParams.get("mode") || WORKOUT_MODES.CLASSIC),
 };
 
 const state = {
@@ -71,19 +116,44 @@ const state = {
   },
   runner: {
     status: "READY",
+    workoutMode: runnerConfig.defaultMode,
     lane: 1,
     intentLane: "hold",
     centerIntentSince: 0,
     switchFxUntil: 0,
     switchLockUntil: 0,
     score: 0,
-    timeLeftSec: 45,
+    timeLeftSec: workoutDuration,
+    hp: workoutMaxHp,
+    maxHp: workoutMaxHp,
     shieldUntil: 0,
     hitFlashUntil: 0,
     missFlashUntil: 0,
+    damageLockUntil: 0,
     obstacles: [],
     spawnAt: 0,
     lastStepAt: 0,
+    intervalPhase: "sprint",
+    intervalSecLeft: intervalSprintSec,
+    intervalStartAt: 0,
+    comboCount: 0,
+    comboMultiplier: 1,
+    maxCombo: 0,
+    squatStreak: 0,
+    reactionTarget: null,
+    reactionIssuedAt: 0,
+    reactionDeadlineAt: 0,
+    reactionResolved: true,
+    reactionNextAt: 0,
+    reactionHighSpeedUntil: 0,
+    reactionStreak: 0,
+    stats: {
+      actionsTotal: 0,
+      actionsCorrect: 0,
+      reactionHits: 0,
+      reactionMsSum: 0,
+      fastHits: 0,
+    },
   },
   visual: {
     fxQuality: "high",
@@ -228,6 +298,202 @@ function laneIntentLabel(desiredLane) {
   return "hold";
 }
 
+function workoutModeLabel(mode) {
+  return MODE_LABELS[mode] || MODE_LABELS[WORKOUT_MODES.CLASSIC];
+}
+
+function workoutSessionDuration(mode) {
+  return mode === WORKOUT_MODES.CLASSIC ? runnerDuration : workoutDuration;
+}
+
+function workoutUpdateInterval(now) {
+  const runner = state.runner;
+  if (!isWorkoutMode(runner.workoutMode)) {
+    runner.intervalPhase = "n/a";
+    runner.intervalSecLeft = 0;
+    return;
+  }
+  const elapsed = Math.max(0, (now - runner.intervalStartAt) / 1000);
+  const inCycle = elapsed % intervalCycleSec;
+  if (inCycle < intervalSprintSec) {
+    runner.intervalPhase = "sprint";
+    runner.intervalSecLeft = intervalSprintSec - inCycle;
+  } else {
+    runner.intervalPhase = "recover";
+    runner.intervalSecLeft = intervalCycleSec - inCycle;
+  }
+}
+
+function workoutResolveReactionInput(actions = {}) {
+  const left = Boolean(actions.leftHandUp);
+  const right = Boolean(actions.rightHandUp);
+  const squat = Boolean(actions.squat);
+  if (squat) return "squat";
+  if (left && !right) return "leftHandUp";
+  if (!left && right) return "rightHandUp";
+  if (!left && !right) return "neutral";
+  return "bothHands";
+}
+
+function workoutPickReactionTarget() {
+  const r = Math.random();
+  let acc = 0;
+  for (const item of REACTION_TARGETS) {
+    acc += item.weight;
+    if (r <= acc) return item;
+  }
+  return REACTION_TARGETS[0];
+}
+
+function workoutReactionWindow(now) {
+  return now <= state.runner.reactionHighSpeedUntil ? reactionWindowMsFast : reactionWindowMsDefault;
+}
+
+function workoutSetReactionTarget(now) {
+  const runner = state.runner;
+  const target = workoutPickReactionTarget();
+  runner.reactionTarget = target.key;
+  runner.reactionIssuedAt = now;
+  runner.reactionDeadlineAt = now + workoutReactionWindow(now);
+  runner.reactionResolved = false;
+}
+
+function workoutClearReactionTarget() {
+  const runner = state.runner;
+  runner.reactionTarget = null;
+  runner.reactionIssuedAt = 0;
+  runner.reactionDeadlineAt = 0;
+  runner.reactionResolved = true;
+}
+
+function workoutRegisterMiss(now) {
+  const runner = state.runner;
+  if (now < runner.damageLockUntil) return false;
+  runner.damageLockUntil = now + 220;
+  runner.missFlashUntil = now + 180;
+  runner.comboCount = 0;
+  runner.comboMultiplier = 1;
+  runner.squatStreak = 0;
+  runner.reactionStreak = 0;
+  if (runner.workoutMode === WORKOUT_MODES.CLASSIC) {
+    setRunnerStatus("GAME_OVER");
+    return true;
+  }
+  runner.hp = Math.max(0, runner.hp - 1);
+  if (runner.hp <= 0) {
+    setRunnerStatus("GAME_OVER");
+  }
+  return true;
+}
+
+function workoutRegisterLanePass(now) {
+  const runner = state.runner;
+  if (runner.workoutMode === WORKOUT_MODES.SPRINT_LANE) {
+    runner.comboCount += 1;
+    if (runner.comboCount % 5 === 0) {
+      runner.comboMultiplier = Math.min(3, runner.comboMultiplier + 1);
+    }
+    runner.maxCombo = Math.max(runner.maxCombo, runner.comboCount);
+    const phaseBoost = runner.intervalPhase === "sprint" ? 1.5 : 1;
+    const points = Math.max(1, Math.round(phaseBoost * runner.comboMultiplier));
+    runner.score += points;
+  } else {
+    runner.score += 1;
+  }
+  runner.hitFlashUntil = now + 120;
+}
+
+function workoutRegisterSquatPass(now) {
+  const runner = state.runner;
+  runner.squatStreak += 1;
+  runner.comboCount = runner.squatStreak;
+  runner.maxCombo = Math.max(runner.maxCombo, runner.comboCount);
+  runner.score += 2;
+  if (runner.squatStreak % 3 === 0) {
+    runner.score += 2;
+  }
+  runner.hitFlashUntil = now + 120;
+}
+
+function workoutRegisterReactionPass(now, responseMs) {
+  const runner = state.runner;
+  runner.stats.actionsTotal += 1;
+  runner.stats.actionsCorrect += 1;
+  runner.stats.reactionHits += 1;
+  runner.stats.reactionMsSum += responseMs;
+  runner.reactionStreak += 1;
+  runner.comboCount = runner.reactionStreak;
+  runner.maxCombo = Math.max(runner.maxCombo, runner.comboCount);
+
+  let points = 1;
+  if (responseMs < reactionFastBonusMs) {
+    points += 1;
+    runner.stats.fastHits += 1;
+  }
+  if (now <= runner.reactionHighSpeedUntil) {
+    points = Math.max(1, Math.round(points * 1.5));
+  }
+  runner.score += points;
+  runner.hitFlashUntil = now + 120;
+
+  if (runner.reactionStreak >= 8) {
+    runner.reactionHighSpeedUntil = Math.max(runner.reactionHighSpeedUntil, now + reactionHighSpeedMs);
+  }
+  workoutClearReactionTarget();
+  runner.reactionNextAt = now + 140;
+}
+
+function workoutSpawnDelayMs() {
+  const runner = state.runner;
+  switch (runner.workoutMode) {
+    case WORKOUT_MODES.CLASSIC: {
+      const elapsedRatio = Math.min(1, runner.score / 50);
+      return spawnMsBase - elapsedRatio * spawnMsDrop;
+    }
+    case WORKOUT_MODES.SPRINT_LANE: {
+      const base = runner.intervalPhase === "sprint" ? 760 : 1080;
+      const scoreDrop = Math.min(220, runner.score * 4);
+      return Math.max(420, base - scoreDrop);
+    }
+    case WORKOUT_MODES.SQUAT_GATE: {
+      const elapsedSec = workoutSessionDuration(runner.workoutMode) - runner.timeLeftSec;
+      const level = Math.min(5, Math.floor(elapsedSec / 30));
+      return Math.max(520, 980 - level * 45);
+    }
+    default:
+      return Infinity;
+  }
+}
+
+function workoutObstacleSpeed() {
+  const runner = state.runner;
+  let speed = worldSpeedBase + Math.min(speedGainCap, runner.score * speedGainPerScore);
+  if (runner.workoutMode === WORKOUT_MODES.SPRINT_LANE) {
+    speed *= runner.intervalPhase === "sprint" ? 1.12 : 0.92;
+  }
+  if (runner.workoutMode === WORKOUT_MODES.SQUAT_GATE) {
+    const elapsedSec = workoutSessionDuration(runner.workoutMode) - runner.timeLeftSec;
+    const level = Math.min(5, Math.floor(elapsedSec / 30));
+    speed *= 0.85 + level * 0.05;
+  }
+  return speed;
+}
+
+function workoutTickReaction(now) {
+  const runner = state.runner;
+  if (runner.workoutMode !== WORKOUT_MODES.REACTION_DRILL || runner.status !== "RUNNING") return;
+  if (!runner.reactionTarget && now >= runner.reactionNextAt) {
+    workoutSetReactionTarget(now);
+    return;
+  }
+  if (runner.reactionTarget && !runner.reactionResolved && now > runner.reactionDeadlineAt) {
+    runner.stats.actionsTotal += 1;
+    workoutClearReactionTarget();
+    runner.reactionNextAt = now + 280;
+    workoutRegisterMiss(now);
+  }
+}
+
 function updateControlButtons() {
   const status = state.runner.status;
   btnStart.disabled = status === "RUNNING" || status === "PAUSED";
@@ -239,6 +505,11 @@ function updateControlButtons() {
 function setRunnerStatus(nextStatus) {
   state.runner.status = nextStatus;
   updateControlButtons();
+}
+
+function switchWorkoutMode(mode) {
+  state.runner.workoutMode = normalizeMode(mode);
+  startGame();
 }
 
 function resolveDesiredLane(payload) {
@@ -286,18 +557,43 @@ function applyLaneImmediately(desiredLane, now = getNow()) {
 }
 
 function resetRunner(now) {
-  state.runner.score = 0;
-  state.runner.timeLeftSec = runnerDuration;
-  state.runner.shieldUntil = 0;
-  state.runner.hitFlashUntil = 0;
-  state.runner.missFlashUntil = 0;
-  state.runner.obstacles = [];
-  state.runner.spawnAt = now + 300;
-  state.runner.lastStepAt = now;
-  state.runner.intentLane = "hold";
-  state.runner.centerIntentSince = 0;
-  state.runner.switchFxUntil = 0;
-  state.runner.switchLockUntil = 0;
+  const runner = state.runner;
+  runner.score = 0;
+  runner.timeLeftSec = workoutSessionDuration(runner.workoutMode);
+  runner.maxHp = isWorkoutMode(runner.workoutMode) ? workoutMaxHp : 1;
+  runner.hp = runner.maxHp;
+  runner.shieldUntil = 0;
+  runner.hitFlashUntil = 0;
+  runner.missFlashUntil = 0;
+  runner.damageLockUntil = 0;
+  runner.obstacles = [];
+  runner.spawnAt = now + 300;
+  runner.lastStepAt = now;
+  runner.intentLane = "hold";
+  runner.centerIntentSince = 0;
+  runner.switchFxUntil = 0;
+  runner.switchLockUntil = 0;
+  runner.intervalPhase = isWorkoutMode(runner.workoutMode) ? "sprint" : "n/a";
+  runner.intervalSecLeft = isWorkoutMode(runner.workoutMode) ? intervalSprintSec : 0;
+  runner.intervalStartAt = now;
+  runner.comboCount = 0;
+  runner.comboMultiplier = 1;
+  runner.maxCombo = 0;
+  runner.squatStreak = 0;
+  runner.reactionTarget = null;
+  runner.reactionIssuedAt = 0;
+  runner.reactionDeadlineAt = 0;
+  runner.reactionResolved = true;
+  runner.reactionNextAt = now + 420;
+  runner.reactionHighSpeedUntil = 0;
+  runner.reactionStreak = 0;
+  runner.stats = {
+    actionsTotal: 0,
+    actionsCorrect: 0,
+    reactionHits: 0,
+    reactionMsSum: 0,
+    fastHits: 0,
+  };
   state.visual.trails = [];
   state.visual.exhaust = [];
 }
@@ -359,20 +655,46 @@ function onPose(payload, now = getNow(), staleBeforeMs = 0) {
     return;
   }
   applyLaneImmediately(resolveDesiredLane(payload), now);
+  const runner = state.runner;
+  if (runner.workoutMode !== WORKOUT_MODES.REACTION_DRILL) return;
+  if (runner.status !== "RUNNING" || runner.reactionResolved || !runner.reactionTarget) return;
+
+  const actionKey = workoutResolveReactionInput(payload.actions || {});
+  if (actionKey === runner.reactionTarget) {
+    workoutRegisterReactionPass(now, Math.max(0, now - runner.reactionIssuedAt));
+    return;
+  }
+
+  if (actionKey !== "neutral" || runner.reactionTarget === "neutral" || actionKey === "bothHands") {
+    runner.stats.actionsTotal += 1;
+    workoutClearReactionTarget();
+    runner.reactionNextAt = now + 260;
+    workoutRegisterMiss(now);
+  }
 }
 
 function spawnObstacle(now) {
-  const safeLane = Math.floor(Math.random() * 3);
-  state.runner.obstacles.push({
-    y: -laneBlockHeight,
-    safeLane,
-    checked: false,
-    seed: Math.random(),
-    bornAt: now,
-  });
-  const elapsedRatio = Math.min(1, state.runner.score / 50);
-  const next = spawnMsBase - elapsedRatio * spawnMsDrop;
-  state.runner.spawnAt = now + next;
+  const runner = state.runner;
+  if (runner.workoutMode === WORKOUT_MODES.SQUAT_GATE) {
+    runner.obstacles.push({
+      kind: "squat_gate",
+      y: -laneBlockHeight,
+      checked: false,
+      seed: Math.random(),
+      bornAt: now,
+    });
+  } else {
+    const safeLane = Math.floor(Math.random() * 3);
+    runner.obstacles.push({
+      kind: "lane_gate",
+      y: -laneBlockHeight,
+      safeLane,
+      checked: false,
+      seed: Math.random(),
+      bornAt: now,
+    });
+  }
+  runner.spawnAt = now + workoutSpawnDelayMs();
 }
 
 function step(now) {
@@ -389,35 +711,44 @@ function step(now) {
     return;
   }
 
-  const speed = worldSpeedBase + Math.min(speedGainCap, runner.score * speedGainPerScore);
-  for (const obs of runner.obstacles) {
-    obs.y += speed * dt;
-  }
-  runner.obstacles = runner.obstacles.filter((o) => o.y - laneBlockHeight < canvas.height + 50);
+  workoutUpdateInterval(now);
+  workoutTickReaction(now);
+  if (runner.status !== "RUNNING") return;
 
-  if (now >= runner.spawnAt) {
-    spawnObstacle(now);
+  if (runner.workoutMode !== WORKOUT_MODES.REACTION_DRILL) {
+    const speed = workoutObstacleSpeed();
+    for (const obs of runner.obstacles) {
+      obs.y += speed * dt;
+    }
+    runner.obstacles = runner.obstacles.filter((o) => o.y - laneBlockHeight < canvas.height + 50);
+    if (now >= runner.spawnAt) {
+      spawnObstacle(now);
+    }
   }
 
-  if (state.py.actions?.squat) {
+  if (runner.workoutMode !== WORKOUT_MODES.REACTION_DRILL && state.py.actions?.squat) {
     runner.shieldUntil = Math.max(runner.shieldUntil, now + 350);
   }
 
   for (const obs of runner.obstacles) {
-    if (obs.checked) continue;
-    if (obs.y >= playerY - laneBlockHeight * 0.34) {
-      obs.checked = true;
-      if (obs.safeLane === runner.lane) {
-        runner.score += 1;
-        runner.hitFlashUntil = now + 130;
-      } else if (now <= runner.shieldUntil) {
-        runner.score += 1;
-        runner.hitFlashUntil = now + 90;
+    if (obs.checked || obs.y < playerY - laneBlockHeight * 0.34) continue;
+    obs.checked = true;
+
+    if (obs.kind === "squat_gate") {
+      if (state.py.actions?.squat) {
+        workoutRegisterSquatPass(now);
       } else {
-        runner.missFlashUntil = now + 180;
-        setRunnerStatus("GAME_OVER");
-        break;
+        workoutRegisterMiss(now);
       }
+      continue;
+    }
+
+    const laneMatched = obs.safeLane === runner.lane;
+    const shielded = now <= runner.shieldUntil;
+    if (laneMatched || shielded) {
+      workoutRegisterLanePass(now);
+    } else if (workoutRegisterMiss(now) && runner.status !== "RUNNING") {
+      break;
     }
   }
 }
@@ -839,7 +1170,32 @@ function drawSafePortal(laneX, y, now, appear) {
   ctx.restore();
 }
 
+function drawWorkoutSquatGate(obs, now) {
+  const appear = clamp((now - (obs.bornAt ?? now)) / 260, 0, 1);
+  const y = obs.y - laneBlockHeight * 0.4;
+  const h = laneBlockHeight * 0.8;
+  const pulse = 0.6 + (Math.sin(now * 0.01) + 1) * 0.2;
+  ctx.save();
+  ctx.globalAlpha = 0.45 + appear * 0.55;
+  const grad = ctx.createLinearGradient(180, y, canvas.width - 180, y + h);
+  grad.addColorStop(0, "#35d7ff");
+  grad.addColorStop(0.5, "#7af8d5");
+  grad.addColorStop(1, "#35d7ff");
+  ctx.fillStyle = grad;
+  roundedRectPath(180, y, canvas.width - 360, h, 16);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+  ctx.lineWidth = 2;
+  roundedRectPath(186, y + 6, canvas.width - 372, h - 12, 10);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawObstacle(obs, now) {
+  if (obs.kind === "squat_gate") {
+    drawWorkoutSquatGate(obs, now);
+    return;
+  }
   const appear = clamp((now - (obs.bornAt ?? now)) / 260, 0, 1);
   const useAsset = canUseAssetMode();
   const fallbackAllowed = !useAsset || visualConfig.assetFallbackEnabled;
@@ -916,6 +1272,102 @@ function drawOverlay(now) {
   }
 }
 
+function drawOverlayV21(now) {
+  const py = state.py;
+  const runner = state.runner;
+  const connectionStale = now - state.lastPayloadTs > 1300;
+  gameStatusEl.textContent = `Status: ${runner.status} | ${workoutModeLabel(runner.workoutMode)}`;
+  timerEl.textContent = `Time: ${Math.max(0, runner.timeLeftSec ?? runnerDuration).toFixed(1)}s`;
+  scoreEl.textContent = `Score: ${runner.score}`;
+  hitsEl.textContent = `Pose Hits: ${py.hits ?? 0}`;
+  laneEl.textContent = `Lane: ${["Left", "Middle", "Right"][runner.lane]}`;
+
+  if (connectionStale) {
+    ctx.fillStyle = "rgba(255,215,110,0.18)";
+    roundedRectPath(26, 24, 380, 48, 11);
+    ctx.fill();
+    ctx.fillStyle = "#ffe8a1";
+    ctx.font = "700 23px Trebuchet MS";
+    ctx.fillText("Waiting Pose Stream...", 42, 57);
+  }
+
+  if (now <= runner.hitFlashUntil) {
+    const fade = 1 - (runner.hitFlashUntil - now) / 130;
+    ctx.fillStyle = `rgba(96,255,190,${0.12 * (1 - fade)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  if (now <= runner.missFlashUntil) {
+    const fade = 1 - (runner.missFlashUntil - now) / 180;
+    ctx.fillStyle = `rgba(255,86,160,${0.16 * (1 - fade)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const phaseColor = runner.intervalPhase === "sprint" ? "#ff9f5e" : "#60f0ff";
+  ctx.fillStyle = "rgba(8,14,30,0.58)";
+  roundedRectPath(20, 74, 440, 84, 12);
+  ctx.fill();
+  ctx.fillStyle = "#d9ecff";
+  ctx.font = "700 20px Trebuchet MS";
+  ctx.fillText(`Mode ${workoutModeLabel(runner.workoutMode)}`, 36, 106);
+  ctx.fillStyle = phaseColor;
+  ctx.font = "700 18px Trebuchet MS";
+  ctx.fillText(`Phase ${runner.intervalPhase} ${Math.ceil(Math.max(0, runner.intervalSecLeft || 0))}s`, 36, 132);
+  ctx.fillStyle = "#8ff7c2";
+  ctx.fillText(`HP ${runner.hp}/${runner.maxHp} | Combo ${runner.comboCount}`, 240, 132);
+
+  if (runner.workoutMode === WORKOUT_MODES.REACTION_DRILL && runner.reactionTarget) {
+    const target = REACTION_TARGETS.find((item) => item.key === runner.reactionTarget);
+    const msLeft = Math.max(0, runner.reactionDeadlineAt - now);
+    ctx.fillStyle = "rgba(18,26,56,0.72)";
+    roundedRectPath(canvas.width / 2 - 190, 86, 380, 82, 12);
+    ctx.fill();
+    ctx.fillStyle = "#ffd27d";
+    ctx.font = "700 20px Trebuchet MS";
+    ctx.fillText(`React: ${target ? target.label : runner.reactionTarget}`, canvas.width / 2 - 170, 122);
+    ctx.fillStyle = "#9af8ff";
+    ctx.fillText(`Window: ${msLeft.toFixed(0)}ms`, canvas.width / 2 - 170, 146);
+  }
+
+  if (runner.status === "GAME_OVER") {
+    const avgReactionMs =
+      runner.stats.reactionHits > 0 ? runner.stats.reactionMsSum / runner.stats.reactionHits : 0;
+    const accuracy =
+      runner.stats.actionsTotal > 0 ? (runner.stats.actionsCorrect / runner.stats.actionsTotal) * 100 : 0;
+    ctx.fillStyle = "rgba(8,10,24,0.7)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(255,84,176,0.55)";
+    ctx.lineWidth = 2;
+    roundedRectPath(canvas.width / 2 - 300, 190, 600, 260, 22);
+    ctx.stroke();
+
+    ctx.fillStyle = "#ff8ab7";
+    ctx.font = "900 62px Trebuchet MS";
+    ctx.fillText("SESSION COMPLETE", canvas.width / 2 - 280, 275);
+    ctx.fillStyle = "#eaf2ff";
+    ctx.font = "700 28px Trebuchet MS";
+    ctx.fillText(`Score ${runner.score}  |  Max Combo ${runner.maxCombo}`, canvas.width / 2 - 236, 326);
+    ctx.font = "600 22px Trebuchet MS";
+    ctx.fillText(
+      `Accuracy ${accuracy.toFixed(1)}%  |  Avg Reaction ${avgReactionMs.toFixed(0)}ms`,
+      canvas.width / 2 - 236,
+      362,
+    );
+    ctx.fillText("Press Restart to run another round", canvas.width / 2 - 182, 396);
+  } else if (runner.status === "PAUSED") {
+    ctx.fillStyle = "rgba(10,10,24,0.55)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ffe18a";
+    ctx.font = "800 64px Trebuchet MS";
+    ctx.fillText("PAUSED", canvas.width / 2 - 126, 320);
+  } else if (runner.status === "READY") {
+    ctx.fillStyle = "rgba(8,10,22,0.42)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#98f0ff";
+    ctx.font = "800 42px Trebuchet MS";
+    ctx.fillText("Press Start to begin", canvas.width / 2 - 180, 312);
+  }
+}
+
 function renderAt(now) {
   state.time.now = now;
   drawBackground(now);
@@ -929,7 +1381,7 @@ function renderAt(now) {
   }
   drawExhaust(now);
   drawPlayer(now);
-  drawOverlay(now);
+  drawOverlayV21(now);
 }
 
 function animationLoop(now) {
@@ -990,7 +1442,81 @@ function renderGameToText() {
   return JSON.stringify(payload);
 }
 
-window.render_game_to_text = renderGameToText;
+function renderGameToTextV21() {
+  const now = getNow();
+  const runner = state.runner;
+  const connectionStaleMs = Math.max(0, now - state.lastPayloadTs);
+  const switchLockMsLeft = Math.max(0, runner.switchLockUntil - now);
+  const centerCommitMsLeft =
+    runner.centerIntentSince > 0 ? Math.max(0, centerCommitMs - (now - runner.centerIntentSince)) : 0;
+  const payload = {
+    coordinateSystem: {
+      origin: "top-left",
+      xAxis: "right-positive",
+      yAxis: "down-positive",
+      unit: "pixel",
+    },
+    mode: runner.status,
+    workoutMode: runner.workoutMode,
+    laneIndex: runner.lane,
+    laneLabel: ["left", "middle", "right"][runner.lane],
+    score: runner.score,
+    timeLeftSec: Number(runner.timeLeftSec.toFixed(2)),
+    hp: runner.hp,
+    maxHp: runner.maxHp,
+    combo: runner.comboCount,
+    comboMultiplier: runner.comboMultiplier,
+    shieldActive: now <= runner.shieldUntil,
+    player: {
+      x: lanes[runner.lane],
+      y: playerY,
+    },
+    obstacles: runner.obstacles.slice(0, 8).map((o) => ({
+      y: Number(o.y.toFixed(1)),
+      kind: o.kind || "lane_gate",
+      safeLane: o.safeLane,
+      checked: o.checked,
+    })),
+    stream: {
+      connected: state.connected,
+      staleMs: Number(connectionStaleMs.toFixed(1)),
+    },
+    control: {
+      intentLane: runner.intentLane,
+      switchLockMsLeft: Number(switchLockMsLeft.toFixed(1)),
+      centerCommitMsLeft: Number(centerCommitMsLeft.toFixed(1)),
+    },
+    training: {
+      intervalPhase: runner.intervalPhase,
+      intervalSecLeft: Number(Math.max(0, runner.intervalSecLeft || 0).toFixed(2)),
+      reactionTarget: runner.reactionTarget,
+      reactionDeadlineMs: Number(Math.max(0, runner.reactionDeadlineAt - now).toFixed(1)),
+      reactionHighSpeedLeftMs: Number(Math.max(0, runner.reactionHighSpeedUntil - now).toFixed(1)),
+    },
+    stats: {
+      actionsTotal: runner.stats.actionsTotal,
+      actionsCorrect: runner.stats.actionsCorrect,
+      reactionHits: runner.stats.reactionHits,
+      reactionAvgMs:
+        runner.stats.reactionHits > 0 ? Number((runner.stats.reactionMsSum / runner.stats.reactionHits).toFixed(1)) : 0,
+      fastHits: runner.stats.fastHits,
+      maxCombo: runner.maxCombo,
+    },
+    visual: {
+      fxQuality: state.visual.fxQuality,
+      renderMode: state.visual.renderMode,
+      assetsLoaded: state.visual.assetsLoaded,
+      assetTheme: state.visual.assetTheme,
+      assetFallbackEnabled: visualConfig.assetFallbackEnabled,
+      assetFallbackReason: state.visual.assetFallbackReason,
+      trailCount: state.visual.trails.length,
+      particleCount: state.visual.exhaust.length,
+    },
+  };
+  return JSON.stringify(payload);
+}
+
+window.render_game_to_text = renderGameToTextV21;
 window.inject_pose_payload = (actions = {}, options = {}) => {
   const now = getNow();
   const staleBeforeMs = typeof options.staleBeforeMs === "number" ? options.staleBeforeMs : 0;
@@ -999,11 +1525,13 @@ window.inject_pose_payload = (actions = {}, options = {}) => {
     actions: {
       leftHandUp: Boolean(actions.leftHandUp),
       rightHandUp: Boolean(actions.rightHandUp),
+      squat: Boolean(actions.squat),
     },
   };
+  state.py = payload;
   onPose(payload, now, staleBeforeMs);
   state.lastPayloadTs = now;
-  return renderGameToText();
+  return renderGameToTextV21();
 };
 window.advanceTime = (ms) => {
   const steps = Math.max(1, Math.round(ms / (1000 / 60)));
@@ -1012,7 +1540,12 @@ window.advanceTime = (ms) => {
     now += 1000 / 60;
     renderAt(now);
   }
-  return renderGameToText();
+  return renderGameToTextV21();
+};
+
+window.switch_workout_mode = (mode) => {
+  switchWorkoutMode(mode);
+  return renderGameToTextV21();
 };
 
 async function toggleFullscreen() {
@@ -1027,7 +1560,12 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "f" || event.key === "F") {
     event.preventDefault();
     toggleFullscreen();
+    return;
   }
+  if (event.key === "0") switchWorkoutMode(WORKOUT_MODES.CLASSIC);
+  if (event.key === "1") switchWorkoutMode(WORKOUT_MODES.SPRINT_LANE);
+  if (event.key === "2") switchWorkoutMode(WORKOUT_MODES.SQUAT_GATE);
+  if (event.key === "3") switchWorkoutMode(WORKOUT_MODES.REACTION_DRILL);
 });
 
 btnStart.addEventListener("click", startGame);

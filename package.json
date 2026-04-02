@@ -7,6 +7,7 @@
     "build": "node scripts/build-web.mjs",
     "serve:web": "python -m http.server 8080 -d web",
     "test:web-gesture": "node scripts/test-web-gesture-state.mjs",
+    "test:web-workout": "node scripts/test-web-workout-modes.mjs",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
