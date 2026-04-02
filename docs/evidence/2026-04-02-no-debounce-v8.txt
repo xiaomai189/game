@@ -1,0 +1,7 @@
+﻿时间: 2026-04-02 23:30:43
+
+[web/game.js 去防抖证据]
+function applyLaneImmediately(desiredLane) {
+
+[已无防抖字段证据]
+no matches for laneCandidate|laneDebounce|applyLaneWithDebounce

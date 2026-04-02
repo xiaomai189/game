@@ -1,0 +1,3 @@
+[   33331ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   36380ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   39440ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41

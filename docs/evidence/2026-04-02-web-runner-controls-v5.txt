@@ -1,0 +1,28 @@
+﻿时间: 2026-04-02 23:10:21
+
+[index.html 控制按钮证据]
+<div class="controls">
+<button id="btnStart" type="button">启动</button>
+<button id="btnPause" type="button">暂停</button>
+<button id="btnResume" type="button">继续</button>
+<button id="btnRestart" type="button">重开</button>
+
+[game.js 状态与控制函数证据]
+function statusText(status) {
+if (status === "PAUSED") return "已暂停";
+function updateControlButtons() {
+btnStart.disabled = status === "RUNNING" || status === "PAUSED";
+btnResume.disabled = status !== "PAUSED";
+updateControlButtons();
+function pauseGame() {
+setRunnerStatus("PAUSED");
+function resumeGame() {
+if (state.runner.status !== "PAUSED") return;
+function restartGame() {
+gameStatusEl.textContent = `状态: ${statusText(state.runner.status)}`;
+} else if (state.runner.status === "PAUSED") {
+ctx.fillText("PAUSED", canvas.width / 2 - 150, 320);
+btnPause.addEventListener("click", pauseGame);
+btnResume.addEventListener("click", resumeGame);
+btnRestart.addEventListener("click", restartGame);
+updateControlButtons();

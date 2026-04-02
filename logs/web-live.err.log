@@ -1,0 +1,5 @@
+::ffff:127.0.0.1 - - [02/Apr/2026 22:44:06] "GET / HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [02/Apr/2026 22:44:06] "GET /styles.css HTTP/1.1" 304 -
+::ffff:127.0.0.1 - - [02/Apr/2026 22:44:06] "GET /game.js HTTP/1.1" 200 -
+::ffff:127.0.0.1 - - [02/Apr/2026 22:44:06] code 404, message File not found
+::ffff:127.0.0.1 - - [02/Apr/2026 22:44:06] "GET /favicon.ico HTTP/1.1" 404 -

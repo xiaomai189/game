@@ -1,0 +1,13 @@
+﻿时间: 2026-04-02 23:17:52
+
+[动作引擎左右手校正证据]
+swap_left_right: bool = False,
+self.swap_left_right = swap_left_right
+if self.swap_left_right:
+left_wrist, right_wrist = right_wrist, left_wrist
+
+[main.py 接入证据]
+swap_left_right=settings.mirror,
+
+[web 去抖参数证据]
+const laneDebounceMs = 60;

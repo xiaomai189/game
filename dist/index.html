@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pose Runner P1</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="hud">
+      <h1>Pose Runner P1</h1>
+      <div id="conn" class="conn">连接中…</div>
+      <div class="meta">
+        <span id="gameStatus">状态: READY</span>
+        <span id="timer">时间: --</span>
+        <span id="score">生存分: 0</span>
+        <span id="hits">命中: 0</span>
+        <span id="lane">通道: 中</span>
+      </div>
+      <div class="controls">
+        <button id="btnStart" type="button">启动</button>
+        <button id="btnPause" type="button">暂停</button>
+        <button id="btnResume" type="button">继续</button>
+        <button id="btnRestart" type="button">重开</button>
+      </div>
+      <div class="tips">先点“启动”；抬左手=左道，抬右手=右道，不抬手=中道；可用“暂停/继续”控制节奏；下蹲可触发护盾一次。</div>
+    </div>
+    <canvas id="game" width="1280" height="720"></canvas>
+    <script type="module" src="./game.js"></script>
+  </body>
+</html>

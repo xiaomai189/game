@@ -1,0 +1,15 @@
+[      73ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:8080/favicon.ico:0
+[   14221ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   17256ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   20283ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   23349ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   26394ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   29436ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   32480ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   35530ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   38582ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   41640ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   44672ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   47733ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   50802ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   53889ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41

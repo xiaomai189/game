@@ -1,0 +1,10 @@
+{
+  "name": "yolo-pose-web-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web UI mini game driven by YOLO pose events",
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "serve:web": "python -m http.server 8080 -d web"
+  }
+}

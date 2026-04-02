@@ -1,0 +1,9 @@
+- generic [ref=e2]:
+  - heading "Pose Runner P1" [level=1] [ref=e3]
+  - generic [ref=e4]: 已连接姿态服务
+  - generic [ref=e5]:
+    - generic [ref=e6]: "时间: 6.7s"
+    - generic [ref=e7]: "生存分: 0"
+    - generic [ref=e8]: "识别命中: 75"
+    - generic [ref=e9]: "通道: 左"
+  - generic [ref=e10]: 左右移动身体切换通道；下蹲可触发护盾穿墙一次。

@@ -1,0 +1,9 @@
+- generic [ref=e2]:
+  - heading "Pose Runner P1" [level=1] [ref=e3]
+  - generic [ref=e4]: 已连接姿态服务
+  - generic [ref=e5]:
+    - generic [ref=e6]: "时间: 22.7s"
+    - generic [ref=e7]: "生存分: 0"
+    - generic [ref=e8]: "识别命中: 44"
+    - generic [ref=e9]: "通道: 中"
+  - generic [ref=e10]: 抬左手=左道，抬右手=右道，不抬手=中道；躲避从上方下落障碍。下蹲可触发护盾一次。

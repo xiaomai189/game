@@ -1,0 +1,13 @@
+﻿v7 pacing evidence
+distance_to_check_px=629.8
+worldSpeedBase=240
+speedGainCap=120
+speedGainPerScore=1.2
+spawnMsBase=1150
+spawnMsDrop=250
+
+score=  0 speed= 240.0px/s travel=2.62s interval=1.15s
+score= 20 speed= 264.0px/s travel=2.39s interval=1.05s
+score= 40 speed= 288.0px/s travel=2.19s interval=0.95s
+score= 60 speed= 312.0px/s travel=2.02s interval=0.90s
+score=100 speed= 360.0px/s travel=1.75s interval=0.90s

@@ -1,0 +1,95 @@
+:root {
+  --bg: #09131f;
+  --panel: #0f1f33cc;
+  --line: #28415f;
+  --text: #eaf3ff;
+  --ok: #3ce58f;
+  --warn: #ffd166;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 20%, #123055 0%, #09131f 42%),
+    radial-gradient(circle at 85% 80%, #1d3558 0%, #09131f 35%);
+  color: var(--text);
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.hud {
+  width: min(1280px, 96vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(22px, 2.7vw, 34px);
+  letter-spacing: 0.5px;
+}
+
+.conn {
+  font-size: 14px;
+  color: var(--warn);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 15px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.controls button {
+  appearance: none;
+  border: 1px solid #2c4f76;
+  border-radius: 8px;
+  background: #143055;
+  color: var(--text);
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.controls button:hover:not(:disabled) {
+  background: #1b3f6f;
+  border-color: #4e7bad;
+}
+
+.controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tips {
+  font-size: 14px;
+  color: #b9cce6;
+}
+
+canvas {
+  width: min(1280px, 96vw);
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #0e1d2f 0%, #06101d 100%);
+  box-shadow: 0 20px 45px #00000066;
+}

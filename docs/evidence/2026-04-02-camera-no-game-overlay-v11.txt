@@ -1,0 +1,13 @@
+﻿时间: 2026-04-02 23:42:35
+
+[renderer 开关证据]
+def __init__(self, keypoint_confidence: float = 0.35, show_game_overlay: bool = True) -> None:
+self.show_game_overlay = show_game_overlay
+if self.show_game_overlay:
+
+[main 参数接入证据]
+"--show-camera-game-overlay",
+show_game_overlay=(settings.show_camera_game_overlay or args.show_camera_game_overlay),
+
+[config 默认值证据]
+show_camera_game_overlay: bool = False

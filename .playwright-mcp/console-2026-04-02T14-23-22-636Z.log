@@ -1,0 +1,8 @@
+[   10293ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:8080/favicon.ico:0
+[   12336ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   15380ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   18439ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   23175ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   26216ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   29249ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40
+[   32299ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:40

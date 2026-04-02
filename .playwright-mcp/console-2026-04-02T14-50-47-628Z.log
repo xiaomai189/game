@@ -1,0 +1,12 @@
+[      74ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:8080/favicon.ico:0
+[   22561ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   25610ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   28643ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   31656ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   34690ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   37737ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   40784ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   43835ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   46895ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   49929ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
+[   53015ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8080/game.js:41
