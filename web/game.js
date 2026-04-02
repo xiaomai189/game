@@ -25,6 +25,15 @@ const runnerDuration = 45;
 const centerCommitMs = 30;
 const laneSwitchLockMs = 70;
 const streamFreezeMs = 300;
+const fxDowngradeFps = 26;
+const fxRecoverFps = 30;
+const fxDowngradeWindow = 40;
+const fxRecoverWindow = 120;
+const trailLifetimeMs = 220;
+const maxTrailHigh = 16;
+const maxTrailLow = 7;
+const maxExhaustHigh = 42;
+const maxExhaustLow = 16;
 
 const state = {
   connected: false,
@@ -51,13 +60,21 @@ const state = {
     score: 0,
     timeLeftSec: 45,
     shieldUntil: 0,
+    hitFlashUntil: 0,
+    missFlashUntil: 0,
     obstacles: [],
     spawnAt: 0,
     lastStepAt: 0,
   },
   visual: {
+    fxQuality: "high",
+    lowFpsStreak: 0,
+    recoverFpsStreak: 0,
+    localFps: 60,
     skyline: [],
     particles: [],
+    trails: [],
+    exhaust: [],
     lastBgAt: 0,
   },
 };
@@ -72,6 +89,54 @@ function clamp(v, min, max) {
 
 function randomRange(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function getRunnerSpeed() {
+  return worldSpeedBase + Math.min(speedGainCap, state.runner.score * speedGainPerScore);
+}
+
+function speedNormalized() {
+  return clamp((getRunnerSpeed() - worldSpeedBase) / speedGainCap, 0, 1);
+}
+
+function updateFxQuality(now) {
+  const visual = state.visual;
+  if (visual.lastBgAt === 0) return;
+  const dt = Math.max(1, now - visual.lastBgAt);
+  const instant = 1000 / dt;
+  visual.localFps = visual.localFps * 0.9 + instant * 0.1;
+
+  if (visual.localFps < fxDowngradeFps) {
+    visual.lowFpsStreak += 1;
+    visual.recoverFpsStreak = 0;
+  } else if (visual.localFps > fxRecoverFps) {
+    visual.recoverFpsStreak += 1;
+    visual.lowFpsStreak = Math.max(0, visual.lowFpsStreak - 1);
+  } else {
+    visual.lowFpsStreak = Math.max(0, visual.lowFpsStreak - 1);
+    visual.recoverFpsStreak = Math.max(0, visual.recoverFpsStreak - 1);
+  }
+
+  if (visual.fxQuality === "high" && visual.lowFpsStreak >= fxDowngradeWindow) {
+    visual.fxQuality = "low";
+    visual.lowFpsStreak = 0;
+  }
+  if (visual.fxQuality === "low" && visual.recoverFpsStreak >= fxRecoverWindow) {
+    visual.fxQuality = "high";
+    visual.recoverFpsStreak = 0;
+  }
+}
+
+function trimFxPools() {
+  const visual = state.visual;
+  const maxTrail = visual.fxQuality === "high" ? maxTrailHigh : maxTrailLow;
+  const maxExhaust = visual.fxQuality === "high" ? maxExhaustHigh : maxExhaustLow;
+  if (visual.trails.length > maxTrail) {
+    visual.trails.splice(0, visual.trails.length - maxTrail);
+  }
+  if (visual.exhaust.length > maxExhaust) {
+    visual.exhaust.splice(0, visual.exhaust.length - maxExhaust);
+  }
 }
 
 function roundedRectPath(x, y, width, height, radius) {
@@ -160,6 +225,8 @@ function resetRunner(now) {
   state.runner.score = 0;
   state.runner.timeLeftSec = runnerDuration;
   state.runner.shieldUntil = 0;
+  state.runner.hitFlashUntil = 0;
+  state.runner.missFlashUntil = 0;
   state.runner.obstacles = [];
   state.runner.spawnAt = now + 300;
   state.runner.lastStepAt = now;
@@ -167,6 +234,8 @@ function resetRunner(now) {
   state.runner.centerIntentSince = 0;
   state.runner.switchFxUntil = 0;
   state.runner.switchLockUntil = 0;
+  state.visual.trails = [];
+  state.visual.exhaust = [];
 }
 
 function startGame() {
@@ -235,6 +304,7 @@ function spawnObstacle(now) {
     safeLane,
     checked: false,
     seed: Math.random(),
+    bornAt: now,
   });
   const elapsedRatio = Math.min(1, state.runner.score / 50);
   const next = spawnMsBase - elapsedRatio * spawnMsDrop;
@@ -275,9 +345,12 @@ function step(now) {
       obs.checked = true;
       if (obs.safeLane === runner.lane) {
         runner.score += 1;
+        runner.hitFlashUntil = now + 130;
       } else if (now <= runner.shieldUntil) {
         runner.score += 1;
+        runner.hitFlashUntil = now + 90;
       } else {
+        runner.missFlashUntil = now + 180;
         setRunnerStatus("GAME_OVER");
         break;
       }
@@ -312,6 +385,7 @@ function initVisuals() {
 function updateParticles(now) {
   const visual = state.visual;
   if (visual.lastBgAt === 0) visual.lastBgAt = now;
+  updateFxQuality(now);
   const dt = clamp((now - visual.lastBgAt) / 1000, 0, 0.08);
   visual.lastBgAt = now;
 
@@ -325,6 +399,45 @@ function updateParticles(now) {
     if (p.x < -20) p.x = canvas.width + 10;
     if (p.x > canvas.width + 20) p.x = -10;
   }
+}
+
+function updateRunnerFx(now) {
+  const visual = state.visual;
+  const speedN = speedNormalized();
+  const laneX = lanes[state.runner.lane];
+  const y = playerY;
+
+  const maxTrail = visual.fxQuality === "high" ? maxTrailHigh : maxTrailLow;
+  visual.trails.push({
+    x: laneX,
+    y,
+    at: now,
+    tilt: speedN,
+  });
+  if (visual.trails.length > maxTrail) {
+    visual.trails.splice(0, visual.trails.length - maxTrail);
+  }
+
+  const particleBurst = visual.fxQuality === "high" ? 2 : 1;
+  for (let i = 0; i < particleBurst; i += 1) {
+    visual.exhaust.push({
+      x: laneX + randomRange(-6, 6),
+      y: y + 18 + randomRange(-4, 4),
+      vx: randomRange(-26, 26),
+      vy: randomRange(42, 88) * (1 + speedN * 0.6),
+      size: randomRange(2.5, 5.8),
+      life: randomRange(150, 230),
+      at: now,
+      hue: Math.random() > 0.5 ? "gold" : "pink",
+    });
+  }
+
+  const maxExhaust = visual.fxQuality === "high" ? maxExhaustHigh : maxExhaustLow;
+  if (visual.exhaust.length > maxExhaust) {
+    visual.exhaust.splice(0, visual.exhaust.length - maxExhaust);
+  }
+
+  trimFxPools();
 }
 
 function drawBackground(now) {
@@ -368,7 +481,9 @@ function drawBackground(now) {
     ctx.stroke();
   }
 
-  for (const p of state.visual.particles) {
+  const particleLimit = state.visual.fxQuality === "high" ? state.visual.particles.length : 24;
+  for (let i = 0; i < particleLimit; i += 1) {
+    const p = state.visual.particles[i];
     const color = p.hue === "pink" ? `rgba(255,120,197,${p.alpha})` : `rgba(117,248,255,${p.alpha})`;
     ctx.save();
     ctx.translate(p.x, p.y);
@@ -391,19 +506,70 @@ function drawBackground(now) {
   }
 }
 
+function drawTrails(now) {
+  const trails = state.visual.trails;
+  if (!trails.length) return;
+  for (let i = 0; i < trails.length; i += 1) {
+    const t = trails[i];
+    const age = now - t.at;
+    if (age > trailLifetimeMs) continue;
+    const fade = 1 - age / trailLifetimeMs;
+    const width = 22 + t.tilt * 20;
+    const height = 10 + t.tilt * 6;
+    ctx.fillStyle = `rgba(130,240,255,${0.12 * fade})`;
+    ctx.beginPath();
+    ctx.ellipse(t.x, t.y + 2, width, height, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,120,197,${0.09 * fade})`;
+    ctx.beginPath();
+    ctx.ellipse(t.x, t.y - 7, width * 0.6, height * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  state.visual.trails = trails.filter((item) => now - item.at <= trailLifetimeMs);
+}
+
+function drawExhaust(now) {
+  const visual = state.visual;
+  if (!visual.exhaust.length) return;
+  const dt = 1000 / 60;
+  const next = [];
+  for (const p of visual.exhaust) {
+    const age = now - p.at;
+    if (age > p.life) continue;
+    p.x += p.vx * (dt / 1000);
+    p.y += p.vy * (dt / 1000);
+    p.vy *= 0.985;
+    p.vx *= 0.97;
+    const fade = 1 - age / p.life;
+    const color =
+      p.hue === "gold"
+        ? `rgba(255,201,124,${0.42 * fade})`
+        : `rgba(255,132,206,${0.32 * fade})`;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.size * fade, p.size * 0.58 * fade, 0, 0, Math.PI * 2);
+    ctx.fill();
+    next.push(p);
+  }
+  visual.exhaust = next;
+}
+
 function drawPlayer(now) {
   const lane = state.runner.lane;
   const x = lanes[lane];
   const shield = now <= state.runner.shieldUntil;
+  const speedN = speedNormalized();
 
   ctx.fillStyle = "rgba(32,44,98,0.56)";
   ctx.beginPath();
-  ctx.ellipse(x, playerY + 24, 78, 16, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, playerY + 24, 78 + speedN * 16, 16 + speedN * 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const jitter = Math.sin(now * 0.017) * 2.6;
+  const jitter = Math.sin(now * (0.017 + speedN * 0.011)) * (2.6 + speedN * 2.2);
+  const tilt = speedN * 0.16;
   ctx.save();
   ctx.translate(x, playerY + jitter);
+  ctx.rotate(tilt);
 
   ctx.fillStyle = "#1f2f70";
   ctx.beginPath();
@@ -436,7 +602,7 @@ function drawPlayer(now) {
   ctx.fillStyle = "rgba(255,176,94,0.9)";
   ctx.beginPath();
   ctx.moveTo(-10, 12);
-  ctx.lineTo(0, 34 + Math.sin(now * 0.022) * 4);
+  ctx.lineTo(0, 34 + Math.sin(now * (0.022 + speedN * 0.012)) * (4 + speedN * 2));
   ctx.lineTo(10, 12);
   ctx.closePath();
   ctx.fill();
@@ -463,12 +629,26 @@ function drawPlayer(now) {
     ctx.beginPath();
     ctx.arc(x, playerY, pulse + 8, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Animated twin arcs to strengthen shield readability.
+    const spin = now * 0.006;
+    ctx.strokeStyle = "rgba(116,255,214,0.85)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, playerY, pulse + 12, spin, spin + Math.PI * 0.85);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, playerY, pulse + 12, spin + Math.PI, spin + Math.PI * 1.85);
+    ctx.stroke();
   }
 }
 
-function drawBlockedGate(laneX, y, seed) {
+function drawBlockedGate(laneX, y, seed, now, appear) {
   const x = laneX - laneBlockWidth / 2;
   const top = y - laneBlockHeight / 2;
+  const scanPhase = ((now * 0.18 + seed * 90) % (laneBlockHeight + 28)) - 14;
+  ctx.save();
+  ctx.globalAlpha = 0.45 + appear * 0.55;
   roundedRectPath(x, top, laneBlockWidth, laneBlockHeight, 18);
   const grad = ctx.createLinearGradient(x, top, x + laneBlockWidth, top + laneBlockHeight);
   grad.addColorStop(0, "#752b95");
@@ -486,20 +666,25 @@ function drawBlockedGate(laneX, y, seed) {
     ctx.fillStyle = i % 2 === 0 ? "rgba(255,84,176,0.35)" : "rgba(255,215,110,0.28)";
     ctx.fillRect(stripeX, top - 4, 12, laneBlockHeight + 8);
   }
+  ctx.fillStyle = "rgba(255,238,180,0.2)";
+  ctx.fillRect(x + 6, top + scanPhase, laneBlockWidth - 12, 10);
   ctx.restore();
 
   ctx.strokeStyle = "rgba(255,220,248,0.6)";
   ctx.lineWidth = 2;
   roundedRectPath(x, top, laneBlockWidth, laneBlockHeight, 18);
   ctx.stroke();
+  ctx.restore();
 }
 
-function drawSafePortal(laneX, y, now) {
+function drawSafePortal(laneX, y, now, appear) {
   const x = laneX - laneBlockWidth / 2 - 8;
   const top = y - laneBlockHeight / 2 - 8;
   const w = laneBlockWidth + 16;
   const h = laneBlockHeight + 16;
   const pulse = 0.55 + (Math.sin(now * 0.012) + 1) * 0.2;
+  ctx.save();
+  ctx.globalAlpha = 0.42 + appear * 0.58;
   ctx.strokeStyle = `rgba(79,248,255,${pulse})`;
   ctx.lineWidth = 3;
   roundedRectPath(x, top, w, h, 20);
@@ -508,14 +693,16 @@ function drawSafePortal(laneX, y, now) {
   ctx.lineWidth = 1.5;
   roundedRectPath(x + 5, top + 5, w - 10, h - 10, 15);
   ctx.stroke();
+  ctx.restore();
 }
 
 function drawObstacle(obs, now) {
+  const appear = clamp((now - (obs.bornAt ?? now)) / 260, 0, 1);
   for (let i = 0; i < 3; i += 1) {
     if (i === obs.safeLane) continue;
-    drawBlockedGate(lanes[i], obs.y, obs.seed);
+    drawBlockedGate(lanes[i], obs.y, obs.seed, now, appear);
   }
-  drawSafePortal(lanes[obs.safeLane], obs.y, now);
+  drawSafePortal(lanes[obs.safeLane], obs.y, now, appear);
 }
 
 function drawOverlay(now) {
@@ -534,6 +721,17 @@ function drawOverlay(now) {
     ctx.fillStyle = "#ffe8a1";
     ctx.font = "700 23px Trebuchet MS";
     ctx.fillText("Waiting Pose Stream…", 42, 57);
+  }
+
+  if (now <= state.runner.hitFlashUntil) {
+    const fade = 1 - (state.runner.hitFlashUntil - now) / 130;
+    ctx.fillStyle = `rgba(96,255,190,${0.12 * (1 - fade)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  if (now <= state.runner.missFlashUntil) {
+    const fade = 1 - (state.runner.missFlashUntil - now) / 180;
+    ctx.fillStyle = `rgba(255,86,160,${0.16 * (1 - fade)})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   if (state.runner.status === "GAME_OVER") {
@@ -571,9 +769,14 @@ function renderAt(now) {
   state.time.now = now;
   drawBackground(now);
   step(now);
+  if (state.runner.status === "RUNNING") {
+    updateRunnerFx(now);
+  }
+  drawTrails(now);
   for (const obs of state.runner.obstacles) {
     drawObstacle(obs, now);
   }
+  drawExhaust(now);
   drawPlayer(now);
   drawOverlay(now);
 }
@@ -621,6 +824,11 @@ function renderGameToText() {
       intentLane: state.runner.intentLane,
       switchLockMsLeft: Number(switchLockMsLeft.toFixed(1)),
       centerCommitMsLeft: Number(centerCommitMsLeft.toFixed(1)),
+    },
+    visual: {
+      fxQuality: state.visual.fxQuality,
+      trailCount: state.visual.trails.length,
+      particleCount: state.visual.exhaust.length,
     },
   };
   return JSON.stringify(payload);

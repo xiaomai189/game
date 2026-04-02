@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-04-02T17:57:12.093Z",
+  "visual": {
+    "fxQuality": "high",
+    "trailCount": 15,
+    "particleCount": 25
+  },
+  "laneLabel": "left",
+  "score": 0,
+  "checks": {
+    "hasVisual": true,
+    "fxQualityPresent": true,
+    "trailCountNonNegative": true,
+    "particleCountNonNegative": true
+  },
+  "state": {
+    "coordinateSystem": {
+      "origin": "top-left",
+      "xAxis": "right-positive",
+      "yAxis": "down-positive",
+      "unit": "pixel"
+    },
+    "mode": "RUNNING",
+    "laneIndex": 0,
+    "laneLabel": "left",
+    "score": 0,
+    "timeLeftSec": 44.98,
+    "shieldActive": false,
+    "player": {
+      "x": 340,
+      "y": 568
+    },
+    "obstacles": [
+      {
+        "y": -168,
+        "safeLane": 1,
+        "checked": false
+      }
+    ],
+    "stream": {
+      "connected": true,
+      "staleMs": 0
+    },
+    "control": {
+      "intentLane": "left",
+      "switchLockMsLeft": 503.2,
+      "centerCommitMsLeft": 0
+    },
+    "visual": {
+      "fxQuality": "high",
+      "trailCount": 15,
+      "particleCount": 25
+    }
+  }
+}
