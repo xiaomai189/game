@@ -6,5 +6,8 @@
   "scripts": {
     "build": "node scripts/build-web.mjs",
     "serve:web": "python -m http.server 8080 -d web"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1"
   }
 }

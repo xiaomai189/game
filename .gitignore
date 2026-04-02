@@ -1,0 +1,8 @@
+node_modules/
+.venv/
+.pytest_cache/
+.playwright-mcp/
+output/
+logs/
+__pycache__/
+*.pyc
