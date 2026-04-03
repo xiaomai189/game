@@ -5,6 +5,9 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     camera_index: int = 0
+    camera_sources: tuple[str, ...] = ("0",)
+    active_camera_id: int = 0
+    max_cameras: int = 2
     frame_width: int = 1280
     frame_height: int = 720
     mirror: bool = True

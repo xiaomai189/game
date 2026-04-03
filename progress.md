@@ -1,5 +1,24 @@
 Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到动漫元素，只看到圆圈和长方形，看看使用什么skill创建更加游戏化
 
+## 2026-04-04 v39 YOLO 多摄像头独立并行
+- 新增多摄参数与配置：
+  - `config.py`: `camera_sources`、`active_camera_id`、`max_cameras`
+  - `main.py`: `--camera-sources`、`--active-camera-id`
+- `CameraManager` 支持 `source`（摄像头索引或 URL），改进打开失败报错信息。
+- 主循环重构为多路独立 runtime：
+  - 每路独立 `PoseEngine`、`ActionEngine`、`PipelineStats`、自适应控制器
+  - 每路独立 `persons/roles` 与 warning/health 状态
+- websocket payload 扩展：
+  - 保留 root 旧字段（兼容）
+  - 新增 `activeCameraId` 与 `cameras[]`
+- 新增解析测试：
+  - `tests/test_main_demo_action.py` 增加 camera source 去重/fallback/max 限制回归
+- 验证通过：
+  - `.\.venv\Scripts\python.exe -m pytest -q` -> 30 passed
+  - `npm run build` -> pass
+  - `npm run preflight` -> pass
+  - `python main.py --demo --max-frames 3 --no-display --disable-websocket --camera-sources "0,1"` -> pass
+
 ## 2026-04-04 v38 YOLO 单摄双人识别与角色绑定
 - `PoseEngine` 增量支持多人输出：`PoseOutput.persons`（top-2）与 `primary_track_id`，同时保留原 `keypoints` 主路径。
 - `ActionEngine` 新增 `infer_multi` 与 `DualRoleBinder`：
