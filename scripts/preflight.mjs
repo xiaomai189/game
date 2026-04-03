@@ -46,6 +46,12 @@ async function main() {
   await runShell("npm run test:web-gesture");
   await runShell("npm run test:web-classic-timer");
   await runShell("npm run test:web-health-adaptive");
+  await runShell("npm run test:web-avatar-skins");
+  await runShell("npm run test:web-avatar-animation");
+  await runShell("npm run test:web-input-mode-fallback");
+  await runShell("npm run test:web-round-flow");
+  await runShell("npm run test:web-hotkeys-feedback");
+  await runShell("npm run test:web-visual-upgrade");
 }
 
 main().catch((err) => {

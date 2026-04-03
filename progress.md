@@ -1,5 +1,16 @@
 Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到动漫元素，只看到圆圈和长方形，看看使用什么skill创建更加游戏化
 
+## 2026-04-04 v37 Classic 回合反馈与快捷控制增强
+- 新增主状态反馈区：Health 条、Pace 条、Round hint。
+- 新增快捷键闭环：
+  - `Enter/Space`：READY 启动、PAUSED 恢复、GAME_OVER 重开
+  - `P`：RUNNING/PAUSED 切换
+  - `R`：快速重开
+- 回合结束原因可视化：碰撞结束后显示 `collision`，并写入 `render_game_to_text().round.gameOverReason`。
+- `auto` 输入模式降噪：仅在 RUNNING 时尝试相机连接，待机不反复重连。
+- 新增回归：`npm run test:web-hotkeys-feedback`，并纳入 `npm run preflight`。
+- 验证通过：`npm run build`、`npm run test:web-hotkeys-feedback`、`npm run test:web-input-mode-fallback`、`npm run preflight`。
+
 ## 2026-04-02 v12 初始化
 - 已读取 `develop-web-game` 与 `imagegen` 技能文档。
 - 当前环境 `OPENAI_API_KEY` 缺失，无法直接调用 imagegen 生成外部素材。
@@ -79,3 +90,34 @@ Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到
 - 诊断区新增 `health/stride/scale` 显示。
 - 新增 `npm run test:web-health-adaptive` 回归并纳入 `preflight`。
 - 验证通过：`npm run preflight`。
+
+## 2026-04-04 v32 动漫角色 + 2.5D 视觉升级
+- classic 渲染升级为动漫角色占位 + 2.5D 透视场景（不改玩法判定）。
+- 新增视觉回归：`npm run test:web-visual-upgrade`，并接入 `preflight`。
+- 验证通过：`npm run preflight`。
+
+## 2026-04-04 v33 角色素材化与皮肤切换
+- 新增皮肤 manifest + 两套角色素材（`neon`、`sakura`）+ 回退皮肤（`prototype`）。
+- 新增运行时皮肤切换 API：`window.set_avatar_skin`、`window.get_avatar_skins`。
+- 素材缺失时自动从 sprite 回退 procedural，不影响游戏运行。
+- 新增回归：`npm run test:web-avatar-skins` 并接入 `preflight`。
+
+## 2026-04-04 v34 角色动画包与樱花轻彩
+- 新增角色动画状态机：`idle/move_left/move_right/hit/miss/game_over`，并带过渡 blend。
+- 新增视觉预设 API：`window.set_visual_preset`、`window.get_visual_presets`，支持 `sakura-lite/neon` 切换。
+- HUD 说明与诊断文案改为可读文本，诊断区新增 `preset` 显示。
+- 新增回归：`npm run test:web-avatar-animation` 并接入 `preflight`。
+- 验证通过：`npm run preflight`。
+
+## 2026-04-04 v35 classic 专业化 UI 重构
+- classic HUD 重构为主状态区 / 控制区 / 诊断区三层结构。
+- 新增诊断区折叠开关 `#btnDiagToggle`，默认折叠，支持运行时展开查看。
+- `render_game_to_text().visual` 新增 `uiVariant=classic-pro-v35` 便于回归观察。
+- 验证通过：`npm run build`、`npm run test:web-avatar-animation`、`npm run preflight`。
+
+## 2026-04-04 v36 可玩性稳定化与演示模式增强
+- 新增输入模式体系：`auto/camera/keyboard/demo`，并增加 `set_input_mode/get_input_mode` API。
+- `auto` 在相机离线时自动 fallback 到 keyboard；`demo` 支持无相机自动动作演示。
+- classic 文本状态新增 `visual.inputMode`，`uiVariant` 升级为 `classic-pro-v36`。
+- 新增回归：`npm run test:web-input-mode-fallback`、`npm run test:web-round-flow` 并接入 `preflight`。
+- 验证通过：`npm run build`、`npm run test:web-input-mode-fallback`、`npm run test:web-round-flow`、`npm run preflight`。

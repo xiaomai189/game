@@ -1,47 +1,108 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pose Runner P1</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <div class="hud">
-      <div class="brand">
-        <h1>Neon Pose Runner</h1>
-        <p class="brand-sub">Anime Sprint Edition</p>
+  <body data-visual-preset="sakura-lite" data-diag-collapsed="true">
+    <div class="hud" data-ui-variant="classic-pro-v37">
+      <div class="hud-head">
+        <div class="brand">
+          <h1>Pose Runner</h1>
+          <p class="brand-sub">Classic Pro Interface</p>
+        </div>
+        <div class="head-right">
+          <span id="conn" class="conn">Pose stream reconnecting...</span>
+          <button id="btnDiagToggle" class="ghost-btn" type="button" aria-expanded="false">Show Diagnostics</button>
+        </div>
       </div>
-      <div id="conn" class="conn">连接中…</div>
-      <div class="meta">
-        <span id="gameStatus" class="pill">状态: READY</span>
-        <span id="timer" class="pill">时间: --</span>
-        <span id="score" class="pill">得分: 0</span>
-        <span id="hits" class="pill">命中: 0</span>
-        <span id="lane" class="pill">通道: 中</span>
-      </div>
-      <div class="controls">
-        <button id="btnStart" type="button">启动</button>
-        <button id="btnPause" type="button">暂停</button>
-        <button id="btnResume" type="button">继续</button>
-        <button id="btnRestart" type="button">重开</button>
-      </div>
-      <div class="objective" id="objective">目标: --</div>
-      <div class="legend" id="legend">规则: --</div>
-      <div class="diag" id="diagPanel">
-        <span class="diag-item" id="diagStream">stream: --</span>
-        <span class="diag-item" id="diagLatency">input age: --</span>
-        <span class="diag-item" id="diagActions">actions: --</span>
-        <span class="diag-item" id="diagSource">source: --</span>
-      </div>
-      <div class="tips">
-        先点“启动”；抬左手=左道，抬右手=右道，不抬手约30ms回中。键盘兜底：←/→ 换道，↓ 下蹲。按 F 全屏。
-      </div>
+
+      <section class="panel panel-primary" aria-label="Primary game state">
+        <div class="meta">
+          <span id="gameStatus" class="pill">Status: READY</span>
+          <span id="timer" class="pill">Time: --</span>
+          <span id="score" class="pill">Score: 0</span>
+          <span id="hits" class="pill">Pose Hits: 0</span>
+          <span id="lane" class="pill">Lane: Middle</span>
+        </div>
+        <div class="text-blocks">
+          <div class="objective" id="objective">Objective: --</div>
+          <div class="legend" id="legend">Rule: --</div>
+        </div>
+        <div class="feedback-grid" aria-label="Round feedback">
+          <div class="meter-card">
+            <div class="meter-head">
+              <span>Health</span>
+              <span id="healthMeterText">--</span>
+            </div>
+            <div class="meter-track"><div id="healthMeterFill" class="meter-fill"></div></div>
+          </div>
+          <div class="meter-card">
+            <div class="meter-head">
+              <span>Pace</span>
+              <span id="paceMeterText">--</span>
+            </div>
+            <div class="meter-track"><div id="paceMeterFill" class="meter-fill"></div></div>
+          </div>
+          <div class="round-hint" id="roundHint">Round hint: Press Start or Enter to begin.</div>
+        </div>
+      </section>
+
+      <section class="panel panel-controls" aria-label="Controls and setup">
+        <div class="controls">
+          <button id="btnStart" type="button">Start</button>
+          <button id="btnPause" type="button">Pause</button>
+          <button id="btnResume" type="button">Resume</button>
+          <button id="btnRestart" type="button">Restart</button>
+          <label class="switch">
+            Avatar
+            <select id="avatarSkin" aria-label="Avatar skin">
+              <option value="neon">Neon Runner</option>
+              <option value="sakura">Sakura Blade</option>
+              <option value="prototype">Prototype (Fallback)</option>
+            </select>
+          </label>
+          <label class="switch">
+            Visual
+            <select id="visualPreset" aria-label="Visual preset">
+              <option value="sakura-lite">Sakura Light</option>
+              <option value="neon">Cyber Neon</option>
+            </select>
+          </label>
+          <label class="switch">
+            Input
+            <select id="inputMode" aria-label="Input mode">
+              <option value="auto">Auto</option>
+              <option value="camera">Camera</option>
+              <option value="keyboard">Keyboard</option>
+              <option value="demo">Demo</option>
+            </select>
+          </label>
+        </div>
+        <div class="tips" id="tips">
+          Start first. Left hand = left lane, right hand = right lane, neutral returns center.
+          Keyboard fallback: Arrow Left/Right lane, Arrow Down squat shield, Enter/Space start-resume-restart, P pause/resume, R quick restart, F fullscreen.
+        </div>
+      </section>
+
+      <section class="panel panel-diag" id="diagWrap" aria-label="Diagnostics">
+        <div class="diag" id="diagPanel">
+          <span class="diag-item" id="diagStream">stream: --</span>
+          <span class="diag-item" id="diagLatency">input age: --</span>
+          <span class="diag-item" id="diagActions">actions: --</span>
+          <span class="diag-item" id="diagSource">source: --</span>
+        </div>
+      </section>
     </div>
+
     <div class="game-shell">
       <canvas id="game" width="1280" height="720"></canvas>
       <div class="scanline"></div>
     </div>
+
     <script type="module" src="./game.js"></script>
   </body>
 </html>

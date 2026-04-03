@@ -9,6 +9,12 @@
     "test:web-gesture": "node scripts/test-web-gesture-state.mjs",
     "test:web-classic-timer": "node scripts/test-web-classic-timer.mjs",
     "test:web-health-adaptive": "node scripts/test-web-health-adaptive.mjs",
+    "test:web-avatar-skins": "node scripts/test-web-avatar-skins.mjs",
+    "test:web-avatar-animation": "node scripts/test-web-avatar-animation.mjs",
+    "test:web-input-mode-fallback": "node scripts/test-web-input-mode-fallback.mjs",
+    "test:web-round-flow": "node scripts/test-web-round-flow.mjs",
+    "test:web-hotkeys-feedback": "node scripts/test-web-hotkeys-feedback.mjs",
+    "test:web-visual-upgrade": "node scripts/test-web-visual-upgrade.mjs",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
