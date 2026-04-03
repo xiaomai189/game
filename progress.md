@@ -1,5 +1,28 @@
 Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到动漫元素，只看到圆圈和长方形，看看使用什么skill创建更加游戏化
 
+## 2026-04-04 v38 YOLO 单摄双人识别与角色绑定
+- `PoseEngine` 增量支持多人输出：`PoseOutput.persons`（top-2）与 `primary_track_id`，同时保留原 `keypoints` 主路径。
+- `ActionEngine` 新增 `infer_multi` 与 `DualRoleBinder`：
+  - 初始按左右分配 P1/P2
+  - 之后按 `track_id` 粘住
+  - `grace_ms` 内不立即重绑
+- `web_payload` 新增双人扩展字段：
+  - `persons[]`（每人 actions/hands/body/quality/bbox）
+  - `roles.p1 / roles.p2`
+  - 旧字段保持兼容
+- `main.py` 新增参数并接线：
+  - `--max-persons`
+  - `--role-bind-grace-ms`
+  - `--disable-dual-role`
+- 回归新增：
+  - `tests/test_pose_engine.py`（top person 选择）
+  - `tests/test_action_engine.py`（角色绑定 + grace）
+  - `tests/test_web_payload.py`（多人 payload）
+- 验证通过：
+  - `.\.venv\Scripts\python.exe -m pytest -q` -> 27 passed
+  - `npm run build` -> pass
+  - `npm run preflight` -> pass
+
 ## 2026-04-04 v37 Classic 回合反馈与快捷控制增强
 - 新增主状态反馈区：Health 条、Pace 条、Round hint。
 - 新增快捷键闭环：

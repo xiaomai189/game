@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import time
+from typing import Any
 
 import numpy as np
 
@@ -32,6 +34,93 @@ class ActionState:
     calibration_progress: float = 0.0
 
 
+@dataclass
+class PersonActionState:
+    track_id: int | None
+    role: str | None
+    action: ActionState
+    score: float = 0.0
+    bbox: tuple[float, float, float, float] | None = None
+    is_primary: bool = False
+
+
+@dataclass
+class MultiActionOutput:
+    primary_action: ActionState
+    persons: list[PersonActionState] = field(default_factory=list)
+    roles: dict[str, PersonActionState | None] = field(default_factory=lambda: {"p1": None, "p2": None})
+
+
+class DualRoleBinder:
+    def __init__(self, grace_ms: float = 500.0) -> None:
+        self.grace_ms = max(0.0, float(grace_ms))
+        self._slots: dict[str, dict[str, float | int | None]] = {
+            "p1": {"track_id": None, "last_seen_ms": 0.0},
+            "p2": {"track_id": None, "last_seen_ms": 0.0},
+        }
+
+    @staticmethod
+    def _person_center_x(person: PersonActionState) -> float:
+        center = person.action.body_center
+        if center is not None:
+            return float(center[0])
+        if person.bbox is not None:
+            return float((person.bbox[0] + person.bbox[2]) * 0.5)
+        return 0.0
+
+    def assign(
+        self,
+        persons: list[PersonActionState],
+        now_ms: float | None = None,
+    ) -> dict[str, PersonActionState | None]:
+        now_ms = (time.monotonic() * 1000.0) if now_ms is None else now_ms
+        person_by_track: dict[int, PersonActionState] = {
+            int(person.track_id): person for person in persons if person.track_id is not None
+        }
+
+        # Keep existing bindings while tracks are still visible, and expire after grace timeout.
+        for role_name in ("p1", "p2"):
+            slot = self._slots[role_name]
+            track_id = slot["track_id"]
+            if track_id is None:
+                continue
+            track_id_int = int(track_id)
+            if track_id_int in person_by_track:
+                slot["last_seen_ms"] = float(now_ms)
+            elif float(now_ms) - float(slot["last_seen_ms"]) > self.grace_ms:
+                slot["track_id"] = None
+
+        assigned_tracks = {
+            int(slot["track_id"])
+            for slot in self._slots.values()
+            if slot["track_id"] is not None
+        }
+        unassigned = [p for p in persons if p.track_id is not None and int(p.track_id) not in assigned_tracks]
+        unassigned.sort(key=self._person_center_x)
+
+        for role_name in ("p1", "p2"):
+            slot = self._slots[role_name]
+            if slot["track_id"] is not None:
+                continue
+            if not unassigned:
+                break
+            chosen = unassigned.pop(0)
+            slot["track_id"] = int(chosen.track_id) if chosen.track_id is not None else None
+            slot["last_seen_ms"] = float(now_ms)
+
+        role_view: dict[str, PersonActionState | None] = {"p1": None, "p2": None}
+        for role_name in ("p1", "p2"):
+            track_id = self._slots[role_name]["track_id"]
+            if track_id is None:
+                continue
+            bound = person_by_track.get(int(track_id))
+            if bound is None:
+                continue
+            bound.role = role_name.upper()
+            role_view[role_name] = bound
+        return role_view
+
+
 class ActionEngine:
     def __init__(
         self,
@@ -49,6 +138,9 @@ class ActionEngine:
         move_exit_ratio: float = 0.72,
         action_enter_frames: int = 1,
         action_exit_frames: int = 1,
+        dual_role_enabled: bool = True,
+        role_bind_grace_ms: float = 500.0,
+        enable_multi: bool = True,
     ) -> None:
         self.keypoint_confidence = keypoint_confidence
         self.arm_raise_ratio = arm_raise_ratio
@@ -64,6 +156,9 @@ class ActionEngine:
         self.move_exit_ratio = float(max(0.4, min(0.95, move_exit_ratio)))
         self.action_enter_frames = max(1, int(action_enter_frames))
         self.action_exit_frames = max(1, int(action_exit_frames))
+        self.dual_role_enabled = bool(dual_role_enabled)
+        self.role_bind_grace_ms = max(0.0, float(role_bind_grace_ms))
+        self.enable_multi = bool(enable_multi)
         self._last_valid_points: dict[int, tuple[float, float] | None] = {}
         self._missing_counts: dict[int, int] = {}
         self._action_latches: dict[str, bool] = {
@@ -79,6 +174,27 @@ class ActionEngine:
         self._neutral_center_x: float | None = None
         self._shoulder_width: float | None = None
         self._torso_length: float | None = None
+        self._child_kwargs = {
+            "keypoint_confidence": self.keypoint_confidence,
+            "arm_raise_ratio": self.arm_raise_ratio,
+            "move_dead_zone_ratio": self.move_dead_zone_ratio,
+            "squat_ratio": self.squat_ratio,
+            "swap_left_right": self.swap_left_right,
+            "keypoint_grace_frames": self.keypoint_grace_frames,
+            "pose_smoothing_alpha": self.pose_smoothing_alpha,
+            "calibration_frames": self.calibration_frames,
+            "calibration_adapt_alpha": self.calibration_adapt_alpha,
+            "arm_raise_torso_ratio": self.arm_raise_torso_ratio,
+            "move_dead_zone_shoulder_ratio": self.move_dead_zone_shoulder_ratio,
+            "move_exit_ratio": self.move_exit_ratio,
+            "action_enter_frames": self.action_enter_frames,
+            "action_exit_frames": self.action_exit_frames,
+            "dual_role_enabled": False,
+            "role_bind_grace_ms": self.role_bind_grace_ms,
+            "enable_multi": False,
+        }
+        self._person_engines: dict[int, "ActionEngine"] = {}
+        self._role_binder = DualRoleBinder(grace_ms=self.role_bind_grace_ms)
 
     def _point_with_grace(self, keypoints: np.ndarray | None, index: int) -> tuple[float, float] | None:
         if keypoints is not None and keypoints.shape[0] > index:
@@ -274,3 +390,111 @@ class ActionEngine:
         state.calibration_progress = min(1.0, self._calibration_samples / self.calibration_frames)
 
         return state
+
+    def _engine_for_track(self, track_id: int) -> "ActionEngine":
+        child = self._person_engines.get(track_id)
+        if child is None:
+            child = ActionEngine(**self._child_kwargs)
+            self._person_engines[track_id] = child
+        return child
+
+    @staticmethod
+    def _extract_track_id(person: Any, fallback_idx: int) -> int:
+        track_id = getattr(person, "track_id", None)
+        if track_id is None:
+            return -(fallback_idx + 1)
+        return int(track_id)
+
+    @staticmethod
+    def _extract_keypoints(person: Any) -> np.ndarray | None:
+        return getattr(person, "keypoints", None)
+
+    @staticmethod
+    def _extract_bbox(person: Any) -> tuple[float, float, float, float] | None:
+        bbox = getattr(person, "bbox", None)
+        if bbox is None:
+            return None
+        if isinstance(bbox, tuple) and len(bbox) == 4:
+            return tuple(float(v) for v in bbox)
+        return None
+
+    @staticmethod
+    def _extract_score(person: Any) -> float:
+        score = getattr(person, "score", 0.0)
+        try:
+            return float(score)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _copy_action_state(state: ActionState) -> ActionState:
+        return ActionState(
+            left_hand_up=state.left_hand_up,
+            right_hand_up=state.right_hand_up,
+            both_hands_up=state.both_hands_up,
+            squat=state.squat,
+            move_left=state.move_left,
+            move_right=state.move_right,
+            body_center=state.body_center,
+            left_hand=state.left_hand,
+            right_hand=state.right_hand,
+            tracking_quality=state.tracking_quality,
+            calibrated=state.calibrated,
+            calibration_progress=state.calibration_progress,
+        )
+
+    def infer_multi(
+        self,
+        persons: list[Any] | None,
+        frame_shape: tuple[int, int, int],
+        *,
+        now: float | None = None,
+        primary_track_id: int | None = None,
+    ) -> MultiActionOutput:
+        if persons is None:
+            persons = []
+        person_states: list[PersonActionState] = []
+        for idx, person in enumerate(persons):
+            track_id = self._extract_track_id(person, idx)
+            keypoints = self._extract_keypoints(person)
+            bbox = self._extract_bbox(person)
+            score = self._extract_score(person)
+            engine = self._engine_for_track(track_id)
+            action = engine.infer(keypoints, frame_shape)
+            person_states.append(
+                PersonActionState(
+                    track_id=track_id,
+                    role=None,
+                    action=action,
+                    score=score,
+                    bbox=bbox,
+                    is_primary=False,
+                )
+            )
+
+        role_view: dict[str, PersonActionState | None]
+        if self.dual_role_enabled and self.enable_multi:
+            now_ms = (time.monotonic() * 1000.0) if now is None else (float(now) * 1000.0)
+            role_view = self._role_binder.assign(person_states, now_ms=now_ms)
+        else:
+            role_view = {"p1": None, "p2": None}
+
+        primary_state: ActionState | None = None
+        if primary_track_id is not None:
+            for person in person_states:
+                if person.track_id == int(primary_track_id):
+                    person.is_primary = True
+                    primary_state = self._copy_action_state(person.action)
+                    break
+        if primary_state is None and person_states:
+            person_states[0].is_primary = True
+            primary_state = self._copy_action_state(person_states[0].action)
+
+        if primary_state is None:
+            primary_state = ActionState()
+
+        return MultiActionOutput(
+            primary_action=primary_state,
+            persons=person_states,
+            roles=role_view,
+        )

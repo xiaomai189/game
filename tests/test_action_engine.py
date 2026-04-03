@@ -187,3 +187,120 @@ def test_movement_uses_calibrated_neutral_center() -> None:
     strong_shift = engine.infer(build_pose(390), frame_shape=frame_shape)
     assert strong_shift.move_left is False
     assert strong_shift.move_right is True
+
+
+def test_infer_multi_assigns_roles_and_primary_action() -> None:
+    engine = ActionEngine(keypoint_confidence=0.2, dual_role_enabled=True, role_bind_grace_ms=500.0)
+    frame_shape = (480, 640, 3)
+
+    class Person:
+        def __init__(self, track_id: int, keypoints: np.ndarray, bbox: tuple[float, float, float, float], score: float) -> None:
+            self.track_id = track_id
+            self.keypoints = keypoints
+            self.bbox = bbox
+            self.score = score
+
+    p1 = make_keypoints()
+    p1[LEFT_SHOULDER] = [130, 200, 0.9]
+    p1[RIGHT_SHOULDER] = [180, 200, 0.9]
+    p1[LEFT_HIP] = [140, 280, 0.9]
+    p1[RIGHT_HIP] = [170, 280, 0.9]
+    p1[LEFT_KNEE] = [140, 350, 0.9]
+    p1[RIGHT_KNEE] = [170, 350, 0.9]
+
+    p2 = make_keypoints()
+    p2[LEFT_SHOULDER] = [450, 210, 0.9]
+    p2[RIGHT_SHOULDER] = [510, 210, 0.9]
+    p2[RIGHT_WRIST] = [510, 120, 0.9]
+    p2[LEFT_HIP] = [455, 290, 0.9]
+    p2[RIGHT_HIP] = [505, 290, 0.9]
+    p2[LEFT_KNEE] = [455, 360, 0.9]
+    p2[RIGHT_KNEE] = [505, 360, 0.9]
+
+    output = engine.infer_multi(
+        persons=[
+            Person(101, p1, (100.0, 150.0, 210.0, 360.0), 0.78),
+            Person(202, p2, (420.0, 150.0, 540.0, 360.0), 0.91),
+        ],
+        frame_shape=frame_shape,
+        now=100.0,
+        primary_track_id=202,
+    )
+    assert output.roles["p1"] is not None and output.roles["p1"].track_id == 101
+    assert output.roles["p2"] is not None and output.roles["p2"].track_id == 202
+    assert output.primary_action.right_hand_up is True
+
+    # Swap x positions but keep same track IDs: roles should remain sticky by ID.
+    p1_swapped = p1.copy()
+    p1_swapped[:, 0] += 250
+    p2_swapped = p2.copy()
+    p2_swapped[:, 0] -= 250
+    output_swapped = engine.infer_multi(
+        persons=[
+            Person(101, p1_swapped, (350.0, 150.0, 460.0, 360.0), 0.78),
+            Person(202, p2_swapped, (170.0, 150.0, 290.0, 360.0), 0.91),
+        ],
+        frame_shape=frame_shape,
+        now=100.1,
+        primary_track_id=202,
+    )
+    assert output_swapped.roles["p1"] is not None and output_swapped.roles["p1"].track_id == 101
+    assert output_swapped.roles["p2"] is not None and output_swapped.roles["p2"].track_id == 202
+
+
+def test_infer_multi_role_grace_prevents_immediate_reassignment() -> None:
+    engine = ActionEngine(keypoint_confidence=0.2, dual_role_enabled=True, role_bind_grace_ms=500.0)
+    frame_shape = (480, 640, 3)
+
+    class Person:
+        def __init__(self, track_id: int, keypoints: np.ndarray, bbox: tuple[float, float, float, float], score: float) -> None:
+            self.track_id = track_id
+            self.keypoints = keypoints
+            self.bbox = bbox
+            self.score = score
+
+    base = make_keypoints()
+    base[LEFT_SHOULDER] = [120, 200, 0.9]
+    base[RIGHT_SHOULDER] = [170, 200, 0.9]
+    base[LEFT_HIP] = [130, 280, 0.9]
+    base[RIGHT_HIP] = [160, 280, 0.9]
+    base[LEFT_KNEE] = [130, 350, 0.9]
+    base[RIGHT_KNEE] = [160, 350, 0.9]
+
+    right = base.copy()
+    right[:, 0] += 300
+
+    newcomer = base.copy()
+    newcomer[:, 0] += 220
+
+    engine.infer_multi(
+        persons=[
+            Person(1, base, (90.0, 150.0, 190.0, 360.0), 0.8),
+            Person(2, right, (390.0, 150.0, 490.0, 360.0), 0.8),
+        ],
+        frame_shape=frame_shape,
+        now=200.0,
+        primary_track_id=1,
+    )
+    short_gap = engine.infer_multi(
+        persons=[
+            Person(2, right, (390.0, 150.0, 490.0, 360.0), 0.8),
+            Person(3, newcomer, (310.0, 150.0, 410.0, 360.0), 0.8),
+        ],
+        frame_shape=frame_shape,
+        now=200.2,
+        primary_track_id=2,
+    )
+    assert short_gap.roles["p1"] is None
+    assert short_gap.roles["p2"] is not None and short_gap.roles["p2"].track_id == 2
+
+    long_gap = engine.infer_multi(
+        persons=[
+            Person(2, right, (390.0, 150.0, 490.0, 360.0), 0.8),
+            Person(3, newcomer, (310.0, 150.0, 410.0, 360.0), 0.8),
+        ],
+        frame_shape=frame_shape,
+        now=201.0,
+        primary_track_id=2,
+    )
+    assert long_gap.roles["p1"] is not None and long_gap.roles["p1"].track_id == 3

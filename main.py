@@ -64,6 +64,23 @@ def parse_args() -> argparse.Namespace:
         help="Show game overlay (target/HUD) in camera window.",
     )
     parser.add_argument(
+        "--max-persons",
+        type=int,
+        default=0,
+        help="Maximum persons exported by pose engine. 0 means use config value.",
+    )
+    parser.add_argument(
+        "--role-bind-grace-ms",
+        type=float,
+        default=0.0,
+        help="Dual-role binder grace window in ms. 0 means use config value.",
+    )
+    parser.add_argument(
+        "--disable-dual-role",
+        action="store_true",
+        help="Disable P1/P2 dual-role assignment in multi-person output.",
+    )
+    parser.add_argument(
         "--perf-report",
         type=str,
         default=None,
@@ -176,6 +193,9 @@ def main() -> int:
     model_path = settings.model_path if args.model is None else Path(args.model)
     model_device = settings.model_device if args.device is None else args.device
     game_duration = settings.game_duration_sec if args.duration_sec <= 0 else args.duration_sec
+    max_persons = settings.max_persons if args.max_persons <= 0 else args.max_persons
+    role_bind_grace_ms = settings.role_bind_grace_ms if args.role_bind_grace_ms <= 0 else args.role_bind_grace_ms
+    dual_role_enabled = settings.dual_role_enabled and (not args.disable_dual_role)
 
     pose_engine = None if args.demo else PoseEngine(
         model_path=model_path,
@@ -183,6 +203,8 @@ def main() -> int:
         conf=settings.model_confidence,
         track_stickiness=settings.pose_track_stickiness,
         track_memory_frames=settings.pose_track_memory_frames,
+        max_persons=max_persons,
+        person_select_policy=settings.person_select_policy,
     )
     action_engine = ActionEngine(
         keypoint_confidence=settings.keypoint_confidence,
@@ -199,6 +221,8 @@ def main() -> int:
         move_exit_ratio=settings.move_exit_ratio,
         action_enter_frames=settings.action_enter_frames,
         action_exit_frames=settings.action_exit_frames,
+        dual_role_enabled=dual_role_enabled,
+        role_bind_grace_ms=role_bind_grace_ms,
     )
     game_engine = GameEngine(
         frame_width=settings.frame_width,
@@ -233,6 +257,8 @@ def main() -> int:
     frame_count = 0
     last_screen = None
     last_keypoints = None
+    last_pose_persons = []
+    last_primary_track_id = None
     last_warning: str | None = None
     ws_bridge: WebGameBridge | None = None
     quality_controller = (
@@ -287,6 +313,8 @@ def main() -> int:
                 warning = "Demo mode: synthetic actions are feeding the game loop."
                 tracking_quality = 1.0
                 calibration_progress = 1.0
+                persons_for_payload = []
+                roles_for_payload = {"p1": None, "p2": None}
             else:
                 ok, frame = camera.read()
                 if not ok or frame is None:
@@ -310,6 +338,8 @@ def main() -> int:
                     pipeline_stats.record_infer_fps(infer_fps_counter.tick())
                     keypoints = _rescale_keypoints(pose_output.keypoints, applied_scale)
                     last_keypoints = keypoints
+                    last_pose_persons = pose_output.persons
+                    last_primary_track_id = pose_output.primary_track_id
                     last_warning = pose_output.warning
                     if pose_output.warning:
                         warning = f"{pose_output.warning} | infer_ms={infer_elapsed_ms:.1f} scale={infer_scale:.2f}"
@@ -317,8 +347,19 @@ def main() -> int:
                         warning = f"infer_ms={infer_elapsed_ms:.1f} scale={infer_scale:.2f}"
                 else:
                     keypoints = last_keypoints
+                    pose_output_persons = last_pose_persons
                     warning = last_warning
-                action_state = action_engine.infer(keypoints, frame.shape)
+                if should_infer:
+                    pose_output_persons = pose_output.persons
+                multi_output = action_engine.infer_multi(
+                    persons=pose_output_persons,
+                    frame_shape=frame.shape,
+                    now=now,
+                    primary_track_id=last_primary_track_id,
+                )
+                action_state = multi_output.primary_action
+                persons_for_payload = multi_output.persons
+                roles_for_payload = multi_output.roles
                 tracking_quality = action_state.tracking_quality
                 calibration_progress = action_state.calibration_progress
                 calibration_note = (
@@ -378,6 +419,8 @@ def main() -> int:
                         source="demo" if args.demo else "camera",
                         snapshot=snapshot,
                         action_state=action_state,
+                        persons=persons_for_payload,
+                        roles=roles_for_payload,
                         pipeline=pipeline_stats.snapshot(
                             {
                                 "healthScore": runtime_health_score,

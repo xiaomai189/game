@@ -23,6 +23,10 @@ class Settings:
     action_exit_frames: int = 2
     pose_track_stickiness: float = 0.65
     pose_track_memory_frames: int = 10
+    max_persons: int = 2
+    person_select_policy: str = "conf_area"
+    dual_role_enabled: bool = True
+    role_bind_grace_ms: float = 500.0
     inference_stride_frames: int = 1
     drop_stale_frames: bool = True
     adaptive_resolution_enabled: bool = True
