@@ -113,6 +113,24 @@ h1 {
   gap: 10px;
 }
 
+.objective,
+.legend {
+  font-size: 14px;
+  color: #dce7ff;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #3b4f92;
+  background: linear-gradient(180deg, #1a2146d2, #141c3bd0);
+}
+
+.objective strong {
+  color: #9cf4ff;
+}
+
+.legend strong {
+  color: #ffd76e;
+}
+
 .controls button {
   appearance: none;
   border: 1px solid #5163b0;
@@ -141,6 +159,23 @@ h1 {
 .tips {
   font-size: 14px;
   color: var(--subtext);
+}
+
+.diag {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diag-item {
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid #3f4f8f;
+  background: linear-gradient(180deg, #1d2550c9, #131a35ca);
+  color: #d4e4ff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
 }
 
 .game-shell {

@@ -39,6 +39,3 @@ jobs:
 
       - name: Web gesture regression
         run: npm run test:web-gesture
-
-      - name: Web workout regression
-        run: npm run test:web-workout

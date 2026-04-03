@@ -44,7 +44,8 @@ async function main() {
   await run(python, ["-m", "pytest", "-q"]);
   await runShell("npm run build");
   await runShell("npm run test:web-gesture");
-  await runShell("npm run test:web-workout");
+  await runShell("npm run test:web-classic-timer");
+  await runShell("npm run test:web-health-adaptive");
 }
 
 main().catch((err) => {

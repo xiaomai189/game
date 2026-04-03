@@ -127,3 +127,63 @@ def test_missing_person_for_short_time_uses_grace_then_recovers() -> None:
     assert state_1.right_hand_up is True
     assert state_2.right_hand_up is True
     assert state_3.right_hand_up is False
+
+
+def test_hand_raise_debounce_requires_two_frames_for_toggle() -> None:
+    engine = ActionEngine(
+        keypoint_confidence=0.2,
+        arm_raise_ratio=0.05,
+        keypoint_grace_frames=0,
+        action_enter_frames=2,
+        action_exit_frames=2,
+    )
+    frame_shape = (480, 640, 3)
+    keypoints = make_keypoints()
+    keypoints[RIGHT_SHOULDER] = [440, 240, 0.9]
+    keypoints[RIGHT_WRIST] = [440, 120, 0.9]
+
+    first = engine.infer(keypoints, frame_shape=frame_shape)
+    second = engine.infer(keypoints, frame_shape=frame_shape)
+    assert first.right_hand_up is False
+    assert second.right_hand_up is True
+
+    keypoints[RIGHT_WRIST] = [440, 380, 0.9]
+    third = engine.infer(keypoints, frame_shape=frame_shape)
+    fourth = engine.infer(keypoints, frame_shape=frame_shape)
+    assert third.right_hand_up is True
+    assert fourth.right_hand_up is False
+
+
+def test_movement_uses_calibrated_neutral_center() -> None:
+    engine = ActionEngine(
+        keypoint_confidence=0.2,
+        move_dead_zone_ratio=0.01,
+        move_dead_zone_shoulder_ratio=0.35,
+        calibration_frames=3,
+        calibration_adapt_alpha=0.5,
+        pose_smoothing_alpha=1.0,
+    )
+    frame_shape = (480, 640, 3)
+
+    def build_pose(center_x: float) -> np.ndarray:
+        kps = make_keypoints()
+        kps[LEFT_SHOULDER] = [center_x - 60, 180, 0.9]
+        kps[RIGHT_SHOULDER] = [center_x + 60, 180, 0.9]
+        kps[LEFT_HIP] = [center_x - 45, 300, 0.9]
+        kps[RIGHT_HIP] = [center_x + 45, 300, 0.9]
+        kps[LEFT_KNEE] = [center_x - 45, 390, 0.9]
+        kps[RIGHT_KNEE] = [center_x + 45, 390, 0.9]
+        return kps
+
+    for _ in range(3):
+        state = engine.infer(build_pose(320), frame_shape=frame_shape)
+    assert state.calibrated is True
+    assert state.calibration_progress == 1.0
+
+    slight_shift = engine.infer(build_pose(345), frame_shape=frame_shape)
+    assert slight_shift.move_left is False
+    assert slight_shift.move_right is False
+
+    strong_shift = engine.infer(build_pose(390), frame_shape=frame_shape)
+    assert strong_shift.move_left is False
+    assert strong_shift.move_right is True

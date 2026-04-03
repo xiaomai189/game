@@ -155,3 +155,27 @@ http://127.0.0.1:8080/?mode=reaction_drill
 ```powershell
 npm run test:web-workout
 ```
+
+## Web Architecture (v24)
+- Entry point: `web/game/index.js`
+- Isolated mode modules:
+  - `web/game/modes/classic.js`
+  - `web/game/modes/sprint_lane.js`
+  - `web/game/modes/squat_gate.js`
+  - `web/game/modes/reaction_drill.js`
+- Compatibility shim: `web/game.js` (imports new entry)
+- Public browser APIs remain unchanged:
+  - `window.switch_workout_mode(mode)`
+  - `window.render_game_to_text()`
+  - `window.advanceTime(ms)`
+  - `window.inject_pose_payload(actions, options?)`
+
+## Demo Behavior (v23)
+- `--demo`: neutral demo input (no automatic lane switching)
+- `--demo --demo-auto-actions`: enable automatic synthetic actions for showcase
+
+## Mode Note (v26)
+- The workout modes `sprint_lane`, `squat_gate`, and `reaction_drill` were removed.
+- Current playable web mode is `classic` only.
+- Backward compatibility:
+  - `window.switch_workout_mode(...)` still exists but now maps to classic mode.

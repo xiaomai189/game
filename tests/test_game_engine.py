@@ -35,9 +35,10 @@ def test_no_hit_keeps_score() -> None:
     engine._target = (120, 140)  # noqa: SLF001
 
     state = ActionState(left_hand_up=True, left_hand=(500, 420))
-    engine.update(state, now=10.0)
+    # Stay before expire timestamp to avoid random respawn affecting determinism.
+    engine.update(state, now=9.0)
 
-    snapshot = engine.snapshot(now=10.0)
+    snapshot = engine.snapshot(now=9.0)
     assert snapshot.score == 0
     assert snapshot.last_hit_ts is None
 

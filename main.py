@@ -37,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         help="Run synthetic demo mode without camera/model dependency.",
     )
     parser.add_argument(
+        "--demo-auto-actions",
+        action="store_true",
+        help="Enable automatic synthetic lane/hand actions when --demo is set.",
+    )
+    parser.add_argument(
         "--save-preview",
         type=str,
         default=None,
@@ -90,11 +95,11 @@ def _build_demo_frame(width: int, height: int, frame_count: int, cv2) -> "object
     return frame
 
 
-def _build_demo_action(snapshot, frame_count: int):
+def _build_demo_action(snapshot, frame_count: int, auto_actions: bool = False):
     from core.action_engine import ActionState
 
     state = ActionState()
-    if snapshot.status != "RUNNING":
+    if snapshot.status != "RUNNING" or not auto_actions:
         return state
 
     # Every 24 frames, simulate a short raised-right-hand hit at current target.
@@ -156,7 +161,7 @@ def main() -> int:
     from core.web_bridge import WebGameBridge
     from core.web_payload import build_web_payload
     from core.renderer import RenderInput, Renderer
-    from core.utils import FpsCounter, PipelineStats
+    from core.utils import FpsCounter, PipelineStats, RuntimeQualityController
 
     settings = load_settings()
 
@@ -172,7 +177,13 @@ def main() -> int:
     model_device = settings.model_device if args.device is None else args.device
     game_duration = settings.game_duration_sec if args.duration_sec <= 0 else args.duration_sec
 
-    pose_engine = None if args.demo else PoseEngine(model_path=model_path, device=model_device, conf=settings.model_confidence)
+    pose_engine = None if args.demo else PoseEngine(
+        model_path=model_path,
+        device=model_device,
+        conf=settings.model_confidence,
+        track_stickiness=settings.pose_track_stickiness,
+        track_memory_frames=settings.pose_track_memory_frames,
+    )
     action_engine = ActionEngine(
         keypoint_confidence=settings.keypoint_confidence,
         arm_raise_ratio=settings.arm_raise_ratio,
@@ -180,6 +191,14 @@ def main() -> int:
         squat_ratio=settings.squat_ratio,
         swap_left_right=settings.mirror,
         keypoint_grace_frames=settings.keypoint_grace_frames,
+        pose_smoothing_alpha=settings.pose_smoothing_alpha,
+        calibration_frames=settings.calibration_frames,
+        calibration_adapt_alpha=settings.calibration_adapt_alpha,
+        arm_raise_torso_ratio=settings.arm_raise_torso_ratio,
+        move_dead_zone_shoulder_ratio=settings.move_dead_zone_shoulder_ratio,
+        move_exit_ratio=settings.move_exit_ratio,
+        action_enter_frames=settings.action_enter_frames,
+        action_exit_frames=settings.action_exit_frames,
     )
     game_engine = GameEngine(
         frame_width=settings.frame_width,
@@ -201,16 +220,37 @@ def main() -> int:
     render_fps_counter = FpsCounter()
     pipeline_stats = PipelineStats()
     inference_stride = max(1, int(settings.inference_stride_frames))
+    runtime_stride = inference_stride
     latency_budget_ms = float(settings.latency_budget_ms)
     adaptive_resolution_enabled = bool(settings.adaptive_resolution_enabled)
     drop_stale_frames = bool(settings.drop_stale_frames)
     downscale_ratio = max(0.4, min(1.0, float(settings.inference_downscale_ratio)))
+    adaptive_min_scale = max(0.4, min(1.0, min(downscale_ratio, float(settings.adaptive_min_scale))))
     infer_scale = 1.0
+    runtime_health_score = 100.0
+    tracking_quality = 1.0
+    calibration_progress = 1.0
     frame_count = 0
     last_screen = None
     last_keypoints = None
     last_warning: str | None = None
     ws_bridge: WebGameBridge | None = None
+    quality_controller = (
+        RuntimeQualityController.create(
+            base_inference_stride=inference_stride,
+            min_scale=adaptive_min_scale,
+            max_stride=settings.adaptive_max_stride_frames,
+            scale_step=settings.adaptive_scale_step,
+            low_health_threshold=settings.adaptive_low_health_threshold,
+            high_health_threshold=settings.adaptive_high_health_threshold,
+            adjust_interval_frames=settings.adaptive_adjust_interval_frames,
+            target_render_fps=settings.health_target_render_fps,
+            latency_budget_ms=latency_budget_ms,
+            max_drop_rate=settings.health_max_drop_rate,
+        )
+        if adaptive_resolution_enabled
+        else None
+    )
 
     if not args.disable_websocket:
         try:
@@ -238,9 +278,15 @@ def main() -> int:
                 frame = _build_demo_frame(settings.frame_width, settings.frame_height, frame_count, cv2)
                 pipeline_stats.record_capture_fps(capture_fps_counter.tick())
                 snapshot_for_action = game_engine.snapshot(now=now)
-                action_state = _build_demo_action(snapshot_for_action, frame_count)
+                action_state = _build_demo_action(
+                    snapshot_for_action,
+                    frame_count,
+                    auto_actions=bool(args.demo_auto_actions),
+                )
                 keypoints = None
                 warning = "Demo mode: synthetic actions are feeding the game loop."
+                tracking_quality = 1.0
+                calibration_progress = 1.0
             else:
                 ok, frame = camera.read()
                 if not ok or frame is None:
@@ -254,16 +300,9 @@ def main() -> int:
                 pipeline_stats.record_capture_fps(capture_fps_counter.tick())
 
                 should_infer = pose_engine is not None and (
-                    frame_count % inference_stride == 0 or last_keypoints is None
+                    frame_count % runtime_stride == 0 or last_keypoints is None
                 )
                 if should_infer:
-                    if adaptive_resolution_enabled:
-                        p95_ms = pipeline_stats.p95_latency_ms()
-                        if p95_ms > latency_budget_ms * 1.10:
-                            infer_scale = downscale_ratio
-                        elif p95_ms < latency_budget_ms * 0.75:
-                            infer_scale = 1.0
-
                     infer_frame, applied_scale = _resize_for_inference(frame, infer_scale, cv2)
                     infer_start = time.perf_counter()
                     pose_output = pose_engine.infer(infer_frame)
@@ -280,6 +319,36 @@ def main() -> int:
                     keypoints = last_keypoints
                     warning = last_warning
                 action_state = action_engine.infer(keypoints, frame.shape)
+                tracking_quality = action_state.tracking_quality
+                calibration_progress = action_state.calibration_progress
+                calibration_note = (
+                    f"calibrating={int(action_state.calibration_progress * 100)}%"
+                    if not action_state.calibrated
+                    else f"tracking={int(action_state.tracking_quality * 100)}%"
+                )
+                warning = f"{warning} | {calibration_note}" if warning else calibration_note
+
+            if quality_controller is not None:
+                runtime_health_score = quality_controller.update(
+                    pipeline_stats=pipeline_stats,
+                    tracking_quality=tracking_quality,
+                    calibration_progress=calibration_progress,
+                )
+                runtime_stride = quality_controller.inference_stride
+                infer_scale = quality_controller.infer_scale
+            else:
+                runtime_health_score = pipeline_stats.health_score(
+                    tracking_quality=tracking_quality,
+                    calibration_progress=calibration_progress,
+                    target_render_fps=settings.health_target_render_fps,
+                    latency_budget_ms=latency_budget_ms,
+                    max_drop_rate=settings.health_max_drop_rate,
+                )
+            warning = (
+                f"{warning} | health={int(runtime_health_score)} stride={runtime_stride} scale={infer_scale:.2f}"
+                if warning
+                else f"health={int(runtime_health_score)} stride={runtime_stride} scale={infer_scale:.2f}"
+            )
 
             game_engine.update(action_state, now=now)
             snapshot = game_engine.snapshot(now=now)
@@ -309,7 +378,15 @@ def main() -> int:
                         source="demo" if args.demo else "camera",
                         snapshot=snapshot,
                         action_state=action_state,
-                        pipeline=pipeline_stats.snapshot(),
+                        pipeline=pipeline_stats.snapshot(
+                            {
+                                "healthScore": runtime_health_score,
+                                "inferenceStrideFrames": float(runtime_stride),
+                                "inferenceScale": infer_scale,
+                                "trackingQuality": tracking_quality,
+                                "calibrationProgress": calibration_progress,
+                            }
+                        ),
                     )
                 )
 
@@ -323,7 +400,8 @@ def main() -> int:
                 if key == ord(" "):
                     game_engine.start(now=time.monotonic())
             elif snapshot.status == "GAME_OVER" and args.max_frames == 0:
-                break
+                # Keep headless service mode alive for web gameplay sessions.
+                game_engine.start(now=time.monotonic())
 
             frame_count += 1
             if args.max_frames > 0 and frame_count >= args.max_frames:
@@ -346,11 +424,20 @@ def main() -> int:
             report = {
                 "source": "demo" if args.demo else "camera",
                 "framesProcessed": frame_count,
-                "inferenceStrideFrames": inference_stride,
+                "inferenceStrideFrames": runtime_stride,
                 "adaptiveResolutionEnabled": adaptive_resolution_enabled,
                 "inferenceScaleFinal": round(infer_scale, 2),
+                "healthScoreFinal": round(runtime_health_score, 2),
                 "latencyBudgetMs": round(latency_budget_ms, 2),
-                "metrics": pipeline_stats.snapshot(),
+                "metrics": pipeline_stats.snapshot(
+                    {
+                        "healthScore": runtime_health_score,
+                        "inferenceStrideFrames": float(runtime_stride),
+                        "inferenceScale": infer_scale,
+                        "trackingQuality": tracking_quality,
+                        "calibrationProgress": calibration_progress,
+                    }
+                ),
             }
             report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
             print(f"Perf report saved to: {report_path}")

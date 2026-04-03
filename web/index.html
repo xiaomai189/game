@@ -16,7 +16,7 @@
       <div class="meta">
         <span id="gameStatus" class="pill">状态: READY</span>
         <span id="timer" class="pill">时间: --</span>
-        <span id="score" class="pill">生存分: 0</span>
+        <span id="score" class="pill">得分: 0</span>
         <span id="hits" class="pill">命中: 0</span>
         <span id="lane" class="pill">通道: 中</span>
       </div>
@@ -26,7 +26,17 @@
         <button id="btnResume" type="button">继续</button>
         <button id="btnRestart" type="button">重开</button>
       </div>
-      <div class="tips">先点“启动”；抬左手=左道，抬右手=右道，不抬手约30ms回中。侧向切道带70ms反向锁定；按 F 全屏，下蹲触发短时护盾。</div>
+      <div class="objective" id="objective">目标: --</div>
+      <div class="legend" id="legend">规则: --</div>
+      <div class="diag" id="diagPanel">
+        <span class="diag-item" id="diagStream">stream: --</span>
+        <span class="diag-item" id="diagLatency">input age: --</span>
+        <span class="diag-item" id="diagActions">actions: --</span>
+        <span class="diag-item" id="diagSource">source: --</span>
+      </div>
+      <div class="tips">
+        先点“启动”；抬左手=左道，抬右手=右道，不抬手约30ms回中。键盘兜底：←/→ 换道，↓ 下蹲。按 F 全屏。
+      </div>
     </div>
     <div class="game-shell">
       <canvas id="game" width="1280" height="720"></canvas>

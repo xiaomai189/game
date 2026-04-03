@@ -88,6 +88,7 @@ game/
 4. 实施后补 `docs/change-logs/YYYY-MM-DD/`，记录改动、原因、验证结果。
 5. 涉及 UI 改动必须附界面证据（截图或等效证据）到 `docs/evidence/`。
 6. 默认执行 `npm run build`；若未执行需在变更记录里说明。
+7. 文档命名必须包含日期和时间（精确到分钟），统一格式：`YYYY-MM-DD-HHmm-主题.md`；适用于 `docs/rpd/`、`docs/change-logs/`、`docs/evidence/` 下新增文档（截图文件建议同样使用该时间格式命名）。
 
 ## 测试与验收
 - 至少验证：构建通过 + 关键功能可用。

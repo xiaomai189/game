@@ -33,3 +33,49 @@ Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到
   - 能量门障碍贴图
   - 城市天际线背景层
   - UI 图标（护盾、连击、速度）
+## 2026-04-03 v23 Demo 自动切道修复
+- 复现：`--demo` 模式下会周期性模拟 `right_hand_up`，前端出现 middle/right 来回切道。
+- 方案：`main.py` 新增 `--demo-auto-actions`，默认关闭；`--demo` 默认改为中立动作，不自动切道。
+- 验证：
+  - `pytest -q` -> 17 passed
+  - `npm run build` -> pass
+  - Playwright 连续 lane 采样 `unique=["middle"]`
+## 2026-04-04 v25 玩法可理解性增强
+- 新增 HUD 目标说明与规则说明，解决“看不懂在玩什么”的反馈。
+- 新增实时诊断区：stream、input age、actions、source。
+- 修复前端连接状态文案乱码。
+- 回归通过：`npm run preflight`（pytest/build/web-gesture/web-workout 全通过）。
+
+## 2026-04-04 v26 删除三种训练模式
+- 按用户要求删除 `sprint_lane / squat_gate / reaction_drill`，仅保留 `classic`。
+- 收敛 `web/game/index.js` 为 classic-only，`switch_workout_mode` 兼容保留但固定 classic。
+- 清理脚本/CI 中 workout 回归项并删除对应测试脚本。
+- 验证通过：`npm run preflight`，一键运行后 `workoutMode=classic`。
+
+## 2026-04-04 v27 Classic 可玩性兜底
+- 增加键盘兜底控制：`←/A` 左道，`→/D` 右道，`↓/S` 下蹲。
+- 增加手动输入优先窗口，解决键盘输入被 websocket 中立流立即覆盖问题。
+- 修复 `stop-oneclick.ps1` 在 pid 文件不存在时的异常。
+- 回归通过：`npm run preflight`。
+
+## 2026-04-04 v28 Classic 时间归零续时
+- 修复 `Classic` 在 `Time=0` 时强制 `GAME_OVER` 的问题，改为时间自动续时循环。
+- 新增 `test:web-classic-timer` 回归，覆盖“续时不断局 + 碰撞仍结束”。
+- 预检通过：`npm run preflight`。
+
+## 2026-04-04 v29 YOLO 稳态识别优化
+- 动作识别新增：启动校准、关键点平滑、动作防抖、移动迟滞。
+- 主目标选择新增：面积+距离粘性策略，减少多人场景下目标跳变。
+- 验证通过：`.\.venv\Scripts\python.exe -m pytest -q`（21 passed）与 `npm run build`。
+
+## 2026-04-04 v30 YOLO 健康评分与自适应降级
+- 新增 health score（融合 fps/延迟/丢帧/跟踪质量/校准进度）。
+- 新增运行时自适应控制器，动态调整 `infer_scale` 与 `inference_stride`。
+- 诊断字段已写入 warning、web payload 与 perf report。
+- 验证通过：`.\.venv\Scripts\python.exe -m pytest -q`（23 passed）与 `npm run build`。
+
+## 2026-04-04 v31 游戏端健康联动调节
+- Web classic 接入 YOLO `healthScore`，低健康自动降速并降低刷怪节奏。
+- 诊断区新增 `health/stride/scale` 显示。
+- 新增 `npm run test:web-health-adaptive` 回归并纳入 `preflight`。
+- 验证通过：`npm run preflight`。
