@@ -4,6 +4,7 @@ param(
     [switch]$NoBrowser,
     [switch]$Demo,
     [switch]$NoDisplay,
+    [string]$CameraSources = "0,1",
     [int]$WebPort = 8080,
     [int]$WebsocketPort = 8765
 )
@@ -60,7 +61,7 @@ function Start-GameProcesses {
         [string]$RootDir
     )
 
-    $backendArgs = @("main.py", "--websocket-port", "$WebsocketPort")
+    $backendArgs = @("main.py", "--websocket-port", "$WebsocketPort", "--camera-sources", "$CameraSources")
     if ($Demo) { $backendArgs += "--demo" }
     if ($NoDisplay) { $backendArgs += "--no-display" }
 
@@ -157,4 +158,3 @@ Write-Host "Backend PID : $($procs.Backend.Id)"
 Write-Host "Web PID     : $($procs.Web.Id)"
 Write-Host "Web URL     : $webUrl"
 Write-Host "Stop command: .\scripts\stop-oneclick.ps1"
-

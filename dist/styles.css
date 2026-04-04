@@ -281,6 +281,74 @@ h1 {
   line-height: 1.4;
 }
 
+.camera-health-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.camera-health-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, #ffffff21, #ffffff0f);
+}
+
+.camera-health-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.camera-health-name {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #fff5fe;
+}
+
+.camera-health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #8f8ba6;
+  box-shadow: 0 0 0 1px #ffffff40;
+}
+
+.camera-health-line {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f2dff0;
+  line-height: 1.35;
+}
+
+.camera-health-card[data-status="ok"] .camera-health-dot {
+  background: #4bd07a;
+  box-shadow: 0 0 14px #4bd07aaa;
+}
+
+.camera-health-card[data-status="warmup"] .camera-health-dot {
+  background: #ffd36e;
+  box-shadow: 0 0 14px #ffd36eaa;
+}
+
+.camera-health-card[data-status="black"] .camera-health-dot {
+  background: #ff6b8a;
+  box-shadow: 0 0 14px #ff6b8aaa;
+}
+
+.camera-health-card[data-status="reconnecting"] .camera-health-dot {
+  background: #7ec9ff;
+  box-shadow: 0 0 14px #7ec9ffaa;
+}
+
+.camera-health-card[data-status="offline"] .camera-health-dot {
+  background: #9f95b8;
+}
+
 .panel-diag {
   transition: max-height 180ms ease, opacity 180ms ease, padding 180ms ease;
 }
@@ -316,6 +384,10 @@ body[data-diag-collapsed="true"] .panel-diag {
 
 @media (max-width: 900px) {
   .feedback-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-health-grid {
     grid-template-columns: 1fr;
   }
 }

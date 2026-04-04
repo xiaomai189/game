@@ -1,7 +1,11 @@
 import { createClassicMode } from "./modes/classic.js";
+import { createDualRaceMode } from "./modes/dual_race.js";
 
 const WS_URL = "ws://127.0.0.1:8765";
 const INPUT_MODES = new Set(["auto", "camera", "keyboard", "demo"]);
+const GAME_MODES = new Set(["auto", "classic", "dual_race"]);
+const WS_RETRY_BASE_MS = 1500;
+const WS_RETRY_MAX_MS = 30000;
 const DEMO_ACTIONS = [
   { leftHandUp: true, rightHandUp: false, squat: false },
   { leftHandUp: false, rightHandUp: true, squat: false },
@@ -37,13 +41,25 @@ const btnDiagToggle = document.getElementById("btnDiagToggle");
 const avatarSkinEl = document.getElementById("avatarSkin");
 const visualPresetEl = document.getElementById("visualPreset");
 const inputModeEl = document.getElementById("inputMode");
+const gameModeEl = document.getElementById("gameMode");
+const cameraCard0El = document.getElementById("cameraCard0");
+const cameraCard1El = document.getElementById("cameraCard1");
+const camera0StatusEl = document.getElementById("camera0Status");
+const camera1StatusEl = document.getElementById("camera1Status");
+const camera0ReasonEl = document.getElementById("camera0Reason");
+const camera1ReasonEl = document.getElementById("camera1Reason");
+const camera0ReconnectEl = document.getElementById("camera0Reconnect");
+const camera1ReconnectEl = document.getElementById("camera1Reconnect");
 
 const state = {
   connected: false,
   requestedInputMode: "auto",
   effectiveInputMode: "keyboard",
+  requestedGameMode: "auto",
+  effectiveGameMode: "classic",
   lastPayloadTs: 0,
   lastPayloadSource: "none",
+  lastPayloadFrame: null,
   lastActions: { leftHandUp: false, rightHandUp: false, squat: false },
   lastPipeline: {
     healthScore: 100,
@@ -51,6 +67,30 @@ const state = {
     inferenceScale: 1,
     trackingQuality: 1,
     calibrationProgress: 1,
+  },
+  lastRuntime: {
+    dualRequested: false,
+    dualReady: false,
+    selfCheckStatus: "disabled",
+    reason: "init",
+    degradedCameraIds: [],
+    maxInputAgeMs: 1200,
+  },
+  cameraRuntimeById: {
+    0: {
+      connected: false,
+      cameraStatus: "UNKNOWN",
+      cameraStatusReason: "waiting payload",
+      blackFrameStreak: 0,
+      reconnectAttempts: 0,
+    },
+    1: {
+      connected: false,
+      cameraStatus: "UNKNOWN",
+      cameraStatusReason: "waiting payload",
+      blackFrameStreak: 0,
+      reconnectAttempts: 0,
+    },
   },
   now: performance.now(),
   manualOverrideUntil: 0,
@@ -74,12 +114,108 @@ function normalizeInputMode(mode) {
   return INPUT_MODES.has(mode) ? mode : "auto";
 }
 
+function normalizeGameMode(mode) {
+  return GAME_MODES.has(mode) ? mode : "auto";
+}
+
 function getNow() {
   return state.now || performance.now();
 }
 
+function hasDualCameraPayload(payload) {
+  const runtime = payload?.runtime;
+  if (runtime && runtime.dualRequested && runtime.dualReady !== true) {
+    return false;
+  }
+  const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+  const ids = new Set(
+    cameras
+      .filter((item) => item && item.connected !== false)
+      .map((item) => Number(item?.cameraId))
+      .filter((id) => Number.isFinite(id)),
+  );
+  return ids.has(0) && ids.has(1);
+}
+
+function resolveEffectiveGameMode(payload = null) {
+  if (state.requestedGameMode === "classic") return "classic";
+  if (state.requestedGameMode === "dual_race") return "dual_race";
+  return hasDualCameraPayload(payload ?? state.lastPayloadFrame) ? "dual_race" : "classic";
+}
+
+function createModeByKind(kind) {
+  if (kind === "dual_race") return createDualRaceMode({ canvas, ctx, initialNow: getNow() });
+  return createClassicMode({ canvas, ctx, initialNow: getNow() });
+}
+
+function syncGameModeSelect() {
+  if (gameModeEl) gameModeEl.value = state.requestedGameMode;
+}
+
+function switchMode(nextKind) {
+  if (state.effectiveGameMode === nextKind && state.mode) return;
+  const now = getNow();
+  const prevStatus = state.mode?.getStatus?.() ?? "READY";
+  state.mode?.dispose?.();
+  state.mode = createModeByKind(nextKind);
+  state.effectiveGameMode = nextKind;
+  populateAvatarSkins();
+  populateVisualPresets();
+  if (prevStatus === "RUNNING") state.mode.start(now);
+  updateControlButtons();
+  updateHud(now);
+}
+
+function refreshEffectiveGameMode(payload = null) {
+  switchMode(resolveEffectiveGameMode(payload));
+}
+
 function clampPercent(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
+}
+
+function normalizeCameraStatus(value) {
+  const raw = String(value || "UNKNOWN").trim().toUpperCase();
+  if (["OK", "WARMUP", "BLACK", "RECONNECTING", "OFFLINE", "UNKNOWN"].includes(raw)) return raw;
+  return "UNKNOWN";
+}
+
+function normalizeCameraRuntime(camera = {}) {
+  const status = normalizeCameraStatus(camera?.cameraStatus);
+  const reconnectAttempts = Number.isFinite(Number(camera?.reconnectAttempts))
+    ? Number(camera.reconnectAttempts)
+    : 0;
+  const blackFrameStreak = Number.isFinite(Number(camera?.blackFrameStreak))
+    ? Number(camera.blackFrameStreak)
+    : 0;
+  const connected = Boolean(camera?.connected);
+  const reasonRaw = camera?.cameraStatusReason;
+  const reason = typeof reasonRaw === "string" && reasonRaw.trim() ? reasonRaw.trim() : connected ? "ok" : "camera offline";
+  return {
+    connected,
+    cameraStatus: status,
+    cameraStatusReason: reason,
+    blackFrameStreak: Math.max(0, Math.round(blackFrameStreak)),
+    reconnectAttempts: Math.max(0, Math.round(reconnectAttempts)),
+  };
+}
+
+function updateCameraHealthCard(cameraId, runtime) {
+  const cardEl = cameraId === 0 ? cameraCard0El : cameraCard1El;
+  const statusEl = cameraId === 0 ? camera0StatusEl : camera1StatusEl;
+  const reasonEl = cameraId === 0 ? camera0ReasonEl : camera1ReasonEl;
+  const reconnectEl = cameraId === 0 ? camera0ReconnectEl : camera1ReconnectEl;
+  if (!cardEl || !statusEl || !reasonEl || !reconnectEl) return;
+  const runtimeSafe = normalizeCameraRuntime(runtime);
+  cardEl.dataset.status = runtimeSafe.cameraStatus.toLowerCase();
+  statusEl.textContent = `status: ${runtimeSafe.cameraStatus} (${runtimeSafe.connected ? "online" : "offline"})`;
+  reasonEl.textContent = `reason: ${runtimeSafe.cameraStatusReason}`;
+  reconnectEl.textContent = `reconnects: ${runtimeSafe.reconnectAttempts} | black streak: ${runtimeSafe.blackFrameStreak}`;
+}
+
+function updateCameraHealthCards() {
+  updateCameraHealthCard(0, state.cameraRuntimeById?.[0] ?? {});
+  updateCameraHealthCard(1, state.cameraRuntimeById?.[1] ?? {});
 }
 
 function setMeter(fillEl, textEl, value, text, riskLevel = "low") {
@@ -117,10 +253,44 @@ function sharedState(now = getNow()) {
       requested: state.requestedInputMode,
       effective: state.effectiveInputMode,
     },
+    gameMode: {
+      requested: state.requestedGameMode,
+      effective: state.effectiveGameMode,
+    },
   };
 }
 
-function updateConnectionBanner() {
+function resetRetryState() {
+  state.ws.retryCount = 0;
+  state.ws.nextRetryAt = 0;
+  state.ws.lastError = "none";
+}
+
+function getTransportSnapshot(now = getNow()) {
+  const ws = state.ws.socket;
+  const retryInMs = Math.max(0, state.ws.nextRetryAt - now);
+  const readyState = ws ? ws.readyState : -1;
+  const readyStateLabel =
+    readyState === WebSocket.CONNECTING
+      ? "CONNECTING"
+      : readyState === WebSocket.OPEN
+        ? "OPEN"
+        : readyState === WebSocket.CLOSING
+          ? "CLOSING"
+          : readyState === WebSocket.CLOSED
+            ? "CLOSED"
+            : "NONE";
+  return {
+    connected: state.connected,
+    retryCount: state.ws.retryCount,
+    retryInMs,
+    nextRetryAt: state.ws.nextRetryAt,
+    socketState: readyStateLabel,
+    lastError: state.ws.lastError,
+  };
+}
+
+function updateConnectionBanner(now = getNow()) {
   const mode = state.effectiveInputMode;
   if (mode === "demo") {
     connEl.textContent = "Demo autopilot active";
@@ -139,15 +309,29 @@ function updateConnectionBanner() {
     connEl.textContent = "Pose stream connected";
     connEl.style.color = "#3ce58f";
   } else {
-    connEl.textContent = "Pose stream reconnecting...";
+    const transport = getTransportSnapshot(now);
+    const attempt = Math.max(1, transport.retryCount);
+    if (transport.retryInMs > 0) {
+      connEl.textContent = `Pose stream offline, retry in ${(transport.retryInMs / 1000).toFixed(1)}s (attempt ${attempt})`;
+    } else if (transport.retryCount > 0) {
+      connEl.textContent = `Pose stream reconnecting... (attempt ${attempt})`;
+    } else {
+      connEl.textContent = "Waiting for pose stream...";
+    }
     connEl.style.color = "#ffd76e";
   }
 }
 
 function setConnectionState(connected) {
   state.connected = connected;
+  if (!connected && state.effectiveInputMode !== "demo") {
+    state.cameraRuntimeById = {
+      0: normalizeCameraRuntime({ connected: false, cameraStatus: "OFFLINE", cameraStatusReason: "ws disconnected" }),
+      1: normalizeCameraRuntime({ connected: false, cameraStatus: "OFFLINE", cameraStatusReason: "ws disconnected" }),
+    };
+  }
   refreshEffectiveInputMode();
-  updateConnectionBanner();
+  updateConnectionBanner(getNow());
 }
 
 function closeSocket() {
@@ -167,7 +351,7 @@ function closeSocket() {
 }
 
 function scheduleReconnect(now) {
-  const delay = Math.min(10000, 500 * 2 ** Math.max(0, state.ws.retryCount - 1));
+  const delay = Math.min(WS_RETRY_MAX_MS, WS_RETRY_BASE_MS * 2 ** Math.max(0, state.ws.retryCount - 1));
   state.ws.nextRetryAt = now + delay;
 }
 
@@ -176,9 +360,7 @@ function connectWebSocket(now) {
   state.ws.socket = ws;
   ws.onopen = () => {
     if (state.ws.socket !== ws) return;
-    state.ws.retryCount = 0;
-    state.ws.nextRetryAt = 0;
-    state.ws.lastError = "none";
+    resetRetryState();
     setConnectionState(true);
     updateHud(getNow());
   };
@@ -202,6 +384,8 @@ function connectWebSocket(now) {
       if (frameNow < state.manualOverrideUntil) return;
       const staleBeforeMs = state.lastPayloadTs === 0 ? 0 : frameNow - state.lastPayloadTs;
       state.lastPayloadSource = payload.source || "camera";
+      state.lastPayloadFrame = payload;
+      refreshEffectiveGameMode(payload);
       onPose(payload, frameNow, staleBeforeMs);
       state.lastPayloadTs = frameNow;
       updateHud(frameNow);
@@ -212,15 +396,10 @@ function connectWebSocket(now) {
 }
 
 function maybeEnsureTransport(now) {
-  const status = state.mode?.getStatus?.() ?? "READY";
-  if (state.requestedInputMode === "auto" && status !== "RUNNING") {
-    closeSocket();
-    if (state.connected) setConnectionState(false);
-    return;
-  }
   const wantsCamera = state.requestedInputMode === "camera" || state.requestedInputMode === "auto";
   if (!wantsCamera) {
     closeSocket();
+    resetRetryState();
     if (state.connected) setConnectionState(false);
     return;
   }
@@ -257,7 +436,7 @@ function syncInputModeSelect() {
 function updateHud(now = getNow()) {
   if (!state.mode) return;
   refreshEffectiveInputMode();
-  updateConnectionBanner();
+  updateConnectionBanner(now);
 
   const hud = state.mode.getHud(now, sharedState(now));
   gameStatusEl.textContent = hud.statusText;
@@ -266,14 +445,19 @@ function updateHud(now = getNow()) {
   hitsEl.textContent = hud.hitsText;
   laneEl.textContent = hud.laneText;
 
-  objectiveEl.textContent = "Objective: avoid pink blocks and pass through the safe lane.";
-  legendEl.textContent = `Rule: +1 per pass. Timer loops at 0s. Wrong lane ends the round. Progress ${clampPercent(hud.progressPct).toFixed(0)}%.`;
+  objectiveEl.textContent =
+    hud.objectiveText || "Objective: avoid pink blocks and pass through the safe lane.";
+  legendEl.textContent =
+    hud.legendText ||
+    `Rule: +1 per pass. Timer loops at 0s. Wrong lane ends the round. Progress ${clampPercent(hud.progressPct).toFixed(0)}%.`;
   const riskLevel = hud.riskLevel || "low";
   setMeter(healthMeterFillEl, healthMeterTextEl, hud.healthScore, `${clampPercent(hud.healthScore).toFixed(0)} / 100`, riskLevel);
   setMeter(paceMeterFillEl, paceMeterTextEl, hud.pacePct, `${clampPercent(hud.pacePct).toFixed(0)}%`, riskLevel);
   if (roundHintEl) roundHintEl.textContent = hud.roundHint || "Round hint: --";
+  updateCameraHealthCards();
 
   const stream = sharedState(now);
+  const transport = getTransportSnapshot(now);
   diagStreamEl.textContent = `input: ${stream.inputMode.effective} (requested:${stream.inputMode.requested})`;
   diagLatencyEl.textContent =
     stream.inputMode.effective === "camera"
@@ -282,10 +466,14 @@ function updateHud(now = getNow()) {
   diagActionsEl.textContent = `actions: L:${Number(state.lastActions.leftHandUp)} R:${Number(state.lastActions.rightHandUp)} S:${Number(state.lastActions.squat)}`;
   const avatarSkin = state.mode?.getAvatarSkin?.() ?? "n/a";
   const visualPreset = state.mode?.getVisualPreset?.() ?? "n/a";
+  const cam0 = normalizeCameraRuntime(state.cameraRuntimeById?.[0] ?? {});
+  const cam1 = normalizeCameraRuntime(state.cameraRuntimeById?.[1] ?? {});
+  const cameraSummary = `cam0:${cam0.cameraStatus}/${cam0.reconnectAttempts} cam1:${cam1.cameraStatus}/${cam1.reconnectAttempts}`;
   diagSourceEl.textContent =
     `source: ${state.lastPayloadSource} health:${state.lastPipeline.healthScore.toFixed(0)} ` +
     `stride:${state.lastPipeline.inferenceStrideFrames.toFixed(0)} scale:${state.lastPipeline.inferenceScale.toFixed(2)} ` +
-    `skin:${avatarSkin} preset:${visualPreset}`;
+    `dual:${state.lastRuntime.dualReady ? "ready" : "degraded"} self:${state.lastRuntime.selfCheckStatus} ` +
+    `skin:${avatarSkin} preset:${visualPreset} mode:${state.effectiveGameMode} ws:${transport.socketState} retry:${transport.retryCount} ${cameraSummary}`;
 }
 
 function populateAvatarSkins() {
@@ -342,9 +530,10 @@ function setInputMode(mode) {
   refreshEffectiveInputMode();
   if (state.requestedInputMode === "keyboard" || state.requestedInputMode === "demo") {
     closeSocket();
+    resetRetryState();
     setConnectionState(false);
   } else {
-    state.ws.nextRetryAt = 0;
+    resetRetryState();
   }
   syncInputModeSelect();
   updateHud(getNow());
@@ -358,6 +547,21 @@ function getInputMode() {
     effective: state.effectiveInputMode,
     connected: state.connected,
     lastError: state.ws.lastError,
+  };
+}
+
+function setGameMode(mode) {
+  state.requestedGameMode = normalizeGameMode(mode);
+  syncGameModeSelect();
+  refreshEffectiveGameMode(state.lastPayloadFrame);
+  updateHud(getNow());
+  return getGameMode();
+}
+
+function getGameMode() {
+  return {
+    requested: state.requestedGameMode,
+    effective: state.effectiveGameMode,
   };
 }
 
@@ -384,20 +588,48 @@ function resolvePipelineMetrics(pipeline = {}) {
 }
 
 function onPose(payload, now, staleBeforeMs = 0) {
-  state.lastActions = resolvePayloadActions(payload.actions ?? {});
-  state.lastPipeline = resolvePipelineMetrics(payload.pipeline ?? {});
+  const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+  const primaryCamera = cameras.find((item) => Number(item?.cameraId) === 0) ?? cameras[0] ?? null;
+  const nextCameraRuntime = {
+    0: { ...state.cameraRuntimeById?.[0], connected: false, cameraStatus: "UNKNOWN", cameraStatusReason: "camera offline" },
+    1: { ...state.cameraRuntimeById?.[1], connected: false, cameraStatus: "UNKNOWN", cameraStatusReason: "camera offline" },
+  };
+  for (const camera of cameras) {
+    const cameraId = Number(camera?.cameraId);
+    if (!Number.isFinite(cameraId)) continue;
+    if (cameraId !== 0 && cameraId !== 1) continue;
+    nextCameraRuntime[cameraId] = normalizeCameraRuntime(camera);
+  }
+  state.cameraRuntimeById = nextCameraRuntime;
+  state.lastActions = resolvePayloadActions(primaryCamera?.actions ?? payload.actions ?? {});
+  state.lastPipeline = resolvePipelineMetrics(primaryCamera?.pipeline ?? payload.pipeline ?? {});
+  state.lastRuntime = {
+    ...state.lastRuntime,
+    ...(payload?.runtime && typeof payload.runtime === "object" ? payload.runtime : {}),
+  };
   state.mode?.onPose(payload, now, staleBeforeMs);
 }
 
 function injectPosePayload(actions = {}, options = {}) {
   const now = getNow();
   const staleBeforeMs = typeof options.staleBeforeMs === "number" ? options.staleBeforeMs : 0;
-  const payload = {
-    type: "frame",
-    actions: resolvePayloadActions(actions),
-    pipeline: resolvePipelineMetrics(options.pipeline ?? {}),
-  };
+  const payload =
+    options?.payload && typeof options.payload === "object"
+      ? {
+          type: "frame",
+          ...options.payload,
+        }
+      : {
+          type: "frame",
+          actions: resolvePayloadActions(actions),
+          pipeline: resolvePipelineMetrics(options.pipeline ?? {}),
+          cameras: Array.isArray(options.cameras) ? options.cameras : undefined,
+        };
+  if (!payload.actions) payload.actions = resolvePayloadActions(actions);
+  if (!payload.pipeline) payload.pipeline = resolvePipelineMetrics(options.pipeline ?? {});
   state.lastPayloadSource = options.source || "inject";
+  state.lastPayloadFrame = payload;
+  refreshEffectiveGameMode(payload);
   onPose(payload, now, staleBeforeMs);
   state.lastPayloadTs = now;
   updateHud(now);
@@ -426,7 +658,18 @@ function maybeDriveDemoInput(now) {
 
 function renderToText(now = getNow()) {
   if (!state.mode) return "{}";
-  return state.mode.renderToText(now, sharedState(now));
+  const raw = state.mode.renderToText(now, sharedState(now));
+  try {
+    const parsed = JSON.parse(raw);
+    parsed.transport = getTransportSnapshot(now);
+    parsed.cameraStatus = {
+      cam0: normalizeCameraRuntime(state.cameraRuntimeById?.[0] ?? {}),
+      cam1: normalizeCameraRuntime(state.cameraRuntimeById?.[1] ?? {}),
+    };
+    return JSON.stringify(parsed);
+  } catch {
+    return raw;
+  }
 }
 
 function startGame() {
@@ -544,6 +787,9 @@ window.set_visual_preset = (presetId) => setVisualPreset(presetId);
 window.get_visual_presets = () => state.mode?.getAvailableVisualPresets?.() ?? [];
 window.set_input_mode = (mode) => setInputMode(mode);
 window.get_input_mode = () => getInputMode();
+window.set_game_mode = (mode) => setGameMode(mode);
+window.get_game_mode = () => getGameMode();
+window.get_transport_state = () => getTransportSnapshot(getNow());
 
 function emitManualPoseFromKeys() {
   const now = getNow();
@@ -641,13 +887,21 @@ if (inputModeEl) {
     if (nextMode) setInputMode(nextMode);
   });
 }
+if (gameModeEl) {
+  gameModeEl.addEventListener("change", (event) => {
+    const nextMode = event.target?.value;
+    if (nextMode) setGameMode(nextMode);
+  });
+}
 
-state.mode = createClassicMode({ canvas, ctx, initialNow: getNow() });
+state.mode = createModeByKind("classic");
 populateAvatarSkins();
 populateVisualPresets();
 syncInputModeSelect();
+syncGameModeSelect();
 applyDiagVisibility();
 setConnectionState(false);
+refreshEffectiveGameMode();
 updateHud(getNow());
 updateControlButtons();
 requestAnimationFrame(renderFrame);

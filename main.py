@@ -99,6 +99,31 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Write runtime performance summary JSON to this path.",
     )
+    parser.add_argument(
+        "--self-check-sec",
+        type=float,
+        default=0.0,
+        help="Startup dual-camera health self-check window in seconds. 0 means use config value.",
+    )
+    parser.add_argument(
+        "--dual-min-fps",
+        type=float,
+        default=0.0,
+        help="Minimum render/infer FPS threshold for dual readiness. 0 means use config value.",
+    )
+    parser.add_argument(
+        "--max-input-age-ms",
+        type=float,
+        default=0.0,
+        help="Maximum acceptable latency/age in milliseconds for dual readiness. 0 means use config value.",
+    )
+    parser.add_argument(
+        "--auto-degrade",
+        type=str,
+        choices=["true", "false"],
+        default=None,
+        help="Enable or disable automatic dual-camera degrade/recover.",
+    )
     return parser.parse_args()
 
 
@@ -246,7 +271,14 @@ def _build_action_engine(settings, *, dual_role_enabled: bool, role_bind_grace_m
     )
 
 
-def _build_quality_controller(settings, *, latency_budget_ms: float, inference_stride: int, adaptive_min_scale: float):
+def _build_quality_controller(
+    settings,
+    *,
+    latency_budget_ms: float,
+    inference_stride: int,
+    adaptive_min_scale: float,
+    initial_infer_scale: float,
+):
     from core.utils import RuntimeQualityController
 
     if not settings.adaptive_resolution_enabled:
@@ -254,6 +286,7 @@ def _build_quality_controller(settings, *, latency_budget_ms: float, inference_s
     return RuntimeQualityController.create(
         base_inference_stride=inference_stride,
         min_scale=adaptive_min_scale,
+        initial_scale=initial_infer_scale,
         max_stride=settings.adaptive_max_stride_frames,
         scale_step=settings.adaptive_scale_step,
         low_health_threshold=settings.adaptive_low_health_threshold,
@@ -263,6 +296,160 @@ def _build_quality_controller(settings, *, latency_budget_ms: float, inference_s
         latency_budget_ms=latency_budget_ms,
         max_drop_rate=settings.health_max_drop_rate,
     )
+
+
+def _select_fallback_camera(
+    connected_ids: list[int],
+    camera_runtime: dict[int, dict[str, Any]],
+) -> int | None:
+    if not connected_ids:
+        return None
+    ranked_ids = sorted(
+        connected_ids,
+        key=lambda camera_id: (
+            0 if camera_runtime[camera_id].get("health_level") == "ok" else 1,
+            -float(camera_runtime[camera_id].get("runtime_health_score", 0.0)),
+        ),
+    )
+    return ranked_ids[0]
+
+
+def _frame_luma_stats(frame, cv2) -> tuple[float, float]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return float(gray.mean()), float(gray.std())
+
+
+def _detect_black_frame(
+    frame,
+    *,
+    mean_threshold: float,
+    std_threshold: float,
+    cv2,
+) -> tuple[bool, float, float]:
+    mean, std = _frame_luma_stats(frame, cv2)
+    is_black = mean < mean_threshold and std < std_threshold
+    return is_black, mean, std
+
+
+def _build_dual_display_screen(
+    *,
+    preview_renderer,
+    camera_runtime: dict[int, dict[str, Any]],
+    camera_source_labels: dict[int, str],
+    snapshot,
+    fps: float,
+    active_camera_id: int,
+    cv2,
+):
+    import numpy as np
+    from core.renderer import RenderInput
+
+    camera_ids = sorted(camera_runtime.keys())
+    if len(camera_ids) < 2:
+        return None
+
+    frame_shapes = [
+        runtime["last_frame"].shape[:2]
+        for runtime in camera_runtime.values()
+        if runtime.get("last_frame") is not None
+    ]
+    if not frame_shapes:
+        return None
+    base_h = max(shape[0] for shape in frame_shapes)
+    base_w = max(shape[1] for shape in frame_shapes)
+
+    panels: list[Any] = []
+    for camera_id in camera_ids[:2]:
+        runtime = camera_runtime[camera_id]
+        frame = runtime.get("last_frame")
+        if frame is None:
+            panel_frame = np.zeros((base_h, base_w, 3), dtype=np.uint8)
+        else:
+            panel_frame = frame
+            if panel_frame.shape[0] != base_h or panel_frame.shape[1] != base_w:
+                panel_frame = cv2.resize(panel_frame, (base_w, base_h), interpolation=cv2.INTER_LINEAR)
+
+        panel = preview_renderer.render(
+            RenderInput(
+                frame=panel_frame,
+                keypoints=runtime.get("last_keypoints"),
+                action_state=runtime["last_action_state"],
+                snapshot=snapshot,
+                fps=fps,
+                warning=runtime.get("last_warning"),
+            )
+        )
+        top_color = (40, 170, 70) if runtime.get("connected") else (80, 80, 80)
+        cv2.rectangle(panel, (0, 0), (panel.shape[1], 52), top_color, -1)
+        source_label = camera_source_labels.get(camera_id, f"camera:{camera_id}")
+        cv2.putText(
+            panel,
+            f"P{camera_id} {source_label}",
+            (14, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.68,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        pipeline = runtime["pipeline_stats"].snapshot()
+        cv2.putText(
+            panel,
+            (
+                f"{'online' if runtime.get('connected') else 'offline'} "
+                f"{str(runtime.get('camera_status', 'unknown')).upper()} "
+                f"h:{float(runtime.get('runtime_health_score', 0.0)):.0f} "
+                f"rf:{float(pipeline.get('renderFps', 0.0)):.1f} "
+                f"if:{float(pipeline.get('inferFps', 0.0)):.1f}"
+            ),
+            (14, 46),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (240, 240, 240),
+            1,
+            cv2.LINE_AA,
+        )
+        if camera_id == active_camera_id:
+            cv2.rectangle(panel, (2, 2), (panel.shape[1] - 2, panel.shape[0] - 2), (20, 220, 255), 3)
+        panels.append(panel)
+
+    screen = cv2.hconcat(panels)
+    summary_bar_h = 36
+    summary = np.zeros((summary_bar_h, screen.shape[1], 3), dtype=np.uint8)
+    summary[:, :, 0] = 24
+    summary[:, :, 1] = 30
+    summary[:, :, 2] = 42
+    status_tokens = []
+    for camera_id in camera_ids[:2]:
+        status = str(camera_runtime[camera_id].get("camera_status", "unknown")).upper()
+        status_tokens.append(f"cam{camera_id}:{status}")
+    cv2.putText(
+        summary,
+        (
+            f"Status:{snapshot.status} Time:{snapshot.countdown_sec:05.1f}s "
+            f"Score:{snapshot.score} Hits:{snapshot.hits} FPS:{fps:.1f} "
+            f"Active:cam{active_camera_id} {' '.join(status_tokens)}"
+        ),
+        (14, 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    return cv2.vconcat([summary, screen])
+
+
+def _fit_for_display(screen, *, max_width: int, max_height: int, cv2):
+    h, w = screen.shape[:2]
+    if h <= 0 or w <= 0:
+        return screen
+    scale = min(float(max_width) / float(w), float(max_height) / float(h), 1.0)
+    if scale >= 0.999:
+        return screen
+    target_w = max(320, int(w * scale))
+    target_h = max(240, int(h * scale))
+    return cv2.resize(screen, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
 
 def main() -> int:
@@ -283,7 +470,14 @@ def main() -> int:
     from core.game_engine import GameEngine
     from core.pose_engine import PoseEngine
     from core.renderer import RenderInput, Renderer
-    from core.utils import FpsCounter, PipelineStats
+    from core.utils import (
+        CameraHealthState,
+        CameraHealthThresholds,
+        DualRuntimeGuard,
+        FpsCounter,
+        PipelineStats,
+        assess_camera_health,
+    )
     from core.web_bridge import WebGameBridge
     from core.web_payload import build_web_payload
 
@@ -302,6 +496,25 @@ def main() -> int:
     drop_stale_frames = bool(settings.drop_stale_frames)
     downscale_ratio = max(0.4, min(1.0, float(settings.inference_downscale_ratio)))
     adaptive_min_scale = max(0.4, min(1.0, min(downscale_ratio, float(settings.adaptive_min_scale))))
+    self_check_sec = float(settings.startup_self_check_sec) if args.self_check_sec <= 0 else float(args.self_check_sec)
+    if args.dual_min_fps > 0:
+        dual_min_render_fps = float(args.dual_min_fps)
+        dual_min_infer_fps = float(args.dual_min_fps)
+    else:
+        dual_min_render_fps = float(settings.dual_min_render_fps)
+        dual_min_infer_fps = float(settings.dual_min_infer_fps)
+    max_input_age_ms = float(settings.max_input_age_ms) if args.max_input_age_ms <= 0 else float(args.max_input_age_ms)
+    auto_degrade = (
+        bool(settings.auto_degrade_enabled)
+        if args.auto_degrade is None
+        else args.auto_degrade.strip().lower() == "true"
+    )
+    health_thresholds = CameraHealthThresholds(
+        min_render_fps=max(1.0, dual_min_render_fps),
+        min_infer_fps=max(1.0, dual_min_infer_fps),
+        max_p95_latency_ms=max(50.0, max_input_age_ms),
+        min_health_score=max(1.0, float(settings.dual_min_health_score)),
+    )
 
     game_engine = GameEngine(
         frame_width=settings.frame_width,
@@ -317,6 +530,10 @@ def main() -> int:
     renderer = Renderer(
         keypoint_confidence=settings.keypoint_confidence,
         show_game_overlay=(settings.show_camera_game_overlay or args.show_camera_game_overlay),
+    )
+    preview_renderer = Renderer(
+        keypoint_confidence=settings.keypoint_confidence,
+        show_game_overlay=False,
     )
     render_fps_counter = FpsCounter()
 
@@ -342,8 +559,18 @@ def main() -> int:
             "pipeline_stats": PipelineStats(),
             "quality_controller": None,
             "runtime_stride": inference_stride,
-            "infer_scale": 1.0,
+            "infer_scale": downscale_ratio,
+            "health_level": "ok",
+            "health_reason": "demo",
             "runtime_health_score": 100.0,
+            "camera_status": "OK",
+            "camera_status_reason": "demo",
+            "black_frame_streak": 0,
+            "last_frame_mean": 80.0,
+            "last_frame_std": 20.0,
+            "reconnect_attempts": 0,
+            "last_reconnect_at": None,
+            "started_at": time.monotonic(),
             "tracking_quality": 1.0,
             "calibration_progress": 1.0,
             "frame_count": 0,
@@ -362,6 +589,12 @@ def main() -> int:
                 width=settings.frame_width,
                 height=settings.frame_height,
                 mirror=settings.mirror,
+                fps=settings.camera_fps,
+                buffer_size=settings.camera_buffer_size,
+                fourcc=settings.camera_fourcc,
+                validation_frames=settings.camera_validation_frames,
+                black_frame_mean_threshold=settings.camera_black_frame_mean_threshold,
+                black_frame_std_threshold=settings.camera_black_frame_std_threshold,
             )
             camera = CameraManager(camera_config)
             try:
@@ -392,10 +625,21 @@ def main() -> int:
                     latency_budget_ms=latency_budget_ms,
                     inference_stride=inference_stride,
                     adaptive_min_scale=adaptive_min_scale,
+                    initial_infer_scale=downscale_ratio,
                 ),
                 "runtime_stride": inference_stride,
-                "infer_scale": 1.0,
+                "infer_scale": downscale_ratio,
+                "health_level": "unknown",
+                "health_reason": "warming-up",
                 "runtime_health_score": 100.0,
+                "camera_status": "WARMUP",
+                "camera_status_reason": "startup",
+                "black_frame_streak": 0,
+                "last_frame_mean": 0.0,
+                "last_frame_std": 0.0,
+                "reconnect_attempts": 0,
+                "last_reconnect_at": None,
+                "started_at": time.monotonic(),
                 "tracking_quality": 1.0,
                 "calibration_progress": 1.0,
                 "frame_count": 0,
@@ -418,6 +662,22 @@ def main() -> int:
             print("Camera initialization failed: no available camera sources.", file=sys.stderr)
             return 2
 
+    dual_guard = DualRuntimeGuard.create(
+        camera_count=len(camera_runtime),
+        auto_degrade=auto_degrade,
+        self_check_seconds=max(0.0, self_check_sec),
+        bad_hold_seconds=max(0.5, float(settings.degrade_trigger_sec)),
+        recovery_seconds=max(0.5, float(settings.degrade_recovery_sec)),
+    )
+    camera_health_by_id: dict[int, Any] = {}
+    if dual_guard.dual_requested:
+        print(
+            "Dual guard enabled: "
+            f"self_check={self_check_sec:.1f}s min_render_fps={health_thresholds.min_render_fps:.1f} "
+            f"min_infer_fps={health_thresholds.min_infer_fps:.1f} max_age={max_input_age_ms:.0f}ms "
+            f"auto_degrade={auto_degrade}"
+        )
+
     ws_bridge: WebGameBridge | None = None
     if not args.disable_websocket:
         try:
@@ -431,9 +691,20 @@ def main() -> int:
     frame_count = 0
     last_screen = None
     active_camera_id = active_camera_id_target
+    window_name = "YOLO Pose Game Prototype"
+    display_max_width = 1280
+    display_max_height = 760
+    black_streak_limit = max(3, int(settings.camera_black_streak_frames))
+    reconnect_cooldown_sec = max(0.5, float(settings.camera_reconnect_cooldown_sec))
+    camera_warmup_sec = max(0.0, float(settings.camera_warmup_sec))
+    black_mean_threshold = float(settings.camera_black_frame_mean_threshold)
+    black_std_threshold = float(settings.camera_black_frame_std_threshold)
 
     try:
         game_engine.start(now=time.monotonic())
+        dual_guard.start(now=time.monotonic())
+        if not args.no_display:
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
         while True:
             now = time.monotonic()
@@ -455,6 +726,8 @@ def main() -> int:
                 runtime["last_roles"] = {"p1": None, "p2": None}
                 runtime["last_keypoints"] = None
                 runtime["runtime_health_score"] = 100.0
+                runtime["camera_status"] = "OK"
+                runtime["camera_status_reason"] = "demo"
                 runtime["tracking_quality"] = 1.0
                 runtime["calibration_progress"] = 1.0
                 runtime["pipeline_stats"].record_render_fps(runtime["process_fps_counter"].tick())
@@ -468,15 +741,99 @@ def main() -> int:
                     ok, frame = camera.read()
                     if not ok or frame is None:
                         runtime["connected"] = False
+                        runtime["camera_status"] = "BLACK"
+                        runtime["camera_status_reason"] = "camera-read-failed"
+                        runtime["black_frame_streak"] = int(runtime.get("black_frame_streak", 0)) + 1
+                        runtime["health_level"] = "offline"
+                        runtime["health_reason"] = "camera-read-failed"
+                        last_reconnect_at = runtime.get("last_reconnect_at")
+                        reconnect_cooldown_ok = (
+                            last_reconnect_at is None
+                            or (now - float(last_reconnect_at)) >= reconnect_cooldown_sec
+                        )
+                        if runtime["black_frame_streak"] >= black_streak_limit and reconnect_cooldown_ok:
+                            runtime["camera_status"] = "RECONNECTING"
+                            runtime["camera_status_reason"] = "read-failed-reconnect"
+                            runtime["last_reconnect_at"] = now
+                            runtime["reconnect_attempts"] = int(runtime.get("reconnect_attempts", 0)) + 1
+                            try:
+                                camera.reopen()
+                                runtime["connected"] = True
+                                runtime["camera_status"] = "WARMUP"
+                                runtime["camera_status_reason"] = "reconnect-ok"
+                                runtime["black_frame_streak"] = 0
+                                runtime["last_warning"] = "camera reconnect ok (read failed path)"
+                            except RuntimeError as exc:
+                                runtime["camera_status"] = "BLACK"
+                                runtime["camera_status_reason"] = "reconnect-failed"
+                                runtime["last_warning"] = f"camera reconnect failed: {exc}"
                         continue
+
+                    frame_is_black, frame_mean, frame_std = _detect_black_frame(
+                        frame,
+                        mean_threshold=black_mean_threshold,
+                        std_threshold=black_std_threshold,
+                        cv2=cv2,
+                    )
+                    runtime["last_frame_mean"] = frame_mean
+                    runtime["last_frame_std"] = frame_std
+                    runtime["pipeline_stats"].record_capture_fps(runtime["capture_fps_counter"].tick())
+                    started_at = float(runtime.get("started_at", now))
+                    warmup_active = (now - started_at) < camera_warmup_sec
+                    if frame_is_black:
+                        runtime["connected"] = True
+                        runtime["last_frame"] = frame
+                        runtime["black_frame_streak"] = int(runtime.get("black_frame_streak", 0)) + 1
+                        runtime["camera_status"] = "WARMUP" if warmup_active else "BLACK"
+                        runtime["camera_status_reason"] = f"mean:{frame_mean:.1f} std:{frame_std:.1f}"
+                        runtime["last_warning"] = (
+                            f"camera-frame-black mean={frame_mean:.1f} std={frame_std:.1f} "
+                            f"streak={runtime['black_frame_streak']}"
+                        )
+                        runtime["pipeline_stats"].record_render_fps(runtime["process_fps_counter"].tick())
+                        runtime["pipeline_stats"].record_latency_ms((time.perf_counter() - camera_step_start) * 1000.0)
+
+                        last_reconnect_at = runtime.get("last_reconnect_at")
+                        reconnect_cooldown_ok = (
+                            last_reconnect_at is None
+                            or (now - float(last_reconnect_at)) >= reconnect_cooldown_sec
+                        )
+                        should_reconnect = (
+                            not warmup_active
+                            and runtime["black_frame_streak"] >= black_streak_limit
+                            and reconnect_cooldown_ok
+                        )
+                        if should_reconnect:
+                            runtime["camera_status"] = "RECONNECTING"
+                            runtime["camera_status_reason"] = "black-streak-reconnect"
+                            runtime["last_reconnect_at"] = now
+                            runtime["reconnect_attempts"] = int(runtime.get("reconnect_attempts", 0)) + 1
+                            try:
+                                camera.reopen()
+                                runtime["connected"] = True
+                                runtime["camera_status"] = "WARMUP"
+                                runtime["camera_status_reason"] = "reconnect-ok"
+                                runtime["black_frame_streak"] = 0
+                                runtime["last_warning"] = "camera reconnect ok (black frame path)"
+                            except RuntimeError as exc:
+                                runtime["camera_status"] = "BLACK"
+                                runtime["camera_status_reason"] = "reconnect-failed"
+                                runtime["connected"] = False
+                                runtime["health_level"] = "offline"
+                                runtime["health_reason"] = "camera-reconnect-failed"
+                                runtime["last_warning"] = f"camera reconnect failed: {exc}"
+                        continue
+
                     runtime["connected"] = True
+                    runtime["black_frame_streak"] = 0
+                    runtime["camera_status"] = "WARMUP" if warmup_active else "OK"
+                    runtime["camera_status_reason"] = f"mean:{frame_mean:.1f} std:{frame_std:.1f}"
                     connected_ids.append(camera_id)
                     if drop_stale_frames and runtime["pipeline_stats"].p95_latency_ms() > latency_budget_ms:
                         ok_latest, latest_frame = camera.read()
                         if ok_latest and latest_frame is not None:
                             frame = latest_frame
                             runtime["pipeline_stats"].mark_dropped_frame()
-                    runtime["pipeline_stats"].record_capture_fps(runtime["capture_fps_counter"].tick())
 
                     pose_engine = runtime["pose_engine"]
                     runtime_stride = int(runtime["runtime_stride"])
@@ -550,10 +907,43 @@ def main() -> int:
                     runtime["pipeline_stats"].record_latency_ms((time.perf_counter() - camera_step_start) * 1000.0)
                     runtime["frame_count"] += 1
 
+                camera_health_by_id = {}
+                for camera_id, runtime in camera_runtime.items():
+                    health_state = assess_camera_health(
+                        connected=bool(runtime.get("connected", False)),
+                        pipeline_stats=runtime["pipeline_stats"],
+                        health_score=float(runtime.get("runtime_health_score", 0.0)),
+                        thresholds=health_thresholds,
+                    )
+                    camera_status = str(runtime.get("camera_status", "UNKNOWN")).upper()
+                    if camera_status == "BLACK":
+                        health_state = CameraHealthState(
+                            level="degraded",
+                            reason="camera-black-frame",
+                            metrics=health_state.metrics,
+                        )
+                    elif camera_status == "RECONNECTING":
+                        health_state = CameraHealthState(
+                            level="offline",
+                            reason="camera-reconnecting",
+                            metrics=health_state.metrics,
+                        )
+                    camera_health_by_id[camera_id] = health_state
+                    runtime["health_level"] = health_state.level
+                    runtime["health_reason"] = health_state.reason
+
+                dual_guard.maybe_complete_self_check(now, camera_health_by_id)
+                dual_guard.update_runtime(now, camera_health_by_id)
+
                 if active_camera_id_target in connected_ids:
                     active_camera_id = active_camera_id_target
                 elif connected_ids:
                     active_camera_id = connected_ids[0]
+
+                if dual_guard.dual_requested and not dual_guard.dual_ready:
+                    fallback_camera = _select_fallback_camera(connected_ids, camera_runtime)
+                    if fallback_camera is not None:
+                        active_camera_id = fallback_camera
 
             if active_camera_id not in camera_runtime:
                 frame_count += 1
@@ -591,12 +981,27 @@ def main() -> int:
                     warning=warning,
                 )
             )
+            dual_screen = _build_dual_display_screen(
+                preview_renderer=preview_renderer,
+                camera_runtime=camera_runtime,
+                camera_source_labels=camera_source_labels,
+                snapshot=snapshot,
+                fps=fps,
+                active_camera_id=active_camera_id,
+                cv2=cv2,
+            )
+            if dual_screen is not None:
+                screen = dual_screen
             last_screen = screen
 
             if ws_bridge is not None:
                 active_pipeline = active_runtime["pipeline_stats"].snapshot(
                     {
                         "healthScore": runtime_health_score,
+                        "healthLevel": active_runtime.get("health_level", "unknown"),
+                        "healthReason": active_runtime.get("health_reason", "unknown"),
+                        "cameraStatus": active_runtime.get("camera_status", "UNKNOWN"),
+                        "cameraStatusReason": active_runtime.get("camera_status_reason", "unknown"),
                         "inferenceStrideFrames": float(active_runtime["runtime_stride"]),
                         "inferenceScale": float(active_runtime["infer_scale"]),
                         "trackingQuality": tracking_quality,
@@ -616,6 +1021,10 @@ def main() -> int:
                     pipeline=active_pipeline,
                 )
                 root_payload["activeCameraId"] = active_camera_id
+                runtime_snapshot = dual_guard.snapshot(now)
+                runtime_snapshot["activeCameraId"] = active_camera_id
+                runtime_snapshot["maxInputAgeMs"] = round(max_input_age_ms, 1)
+                root_payload["runtime"] = runtime_snapshot
                 camera_views: list[dict[str, Any]] = []
                 for camera_id, runtime in camera_runtime.items():
                     camera_frame = runtime["last_frame"]
@@ -627,6 +1036,10 @@ def main() -> int:
                     camera_pipeline = runtime["pipeline_stats"].snapshot(
                         {
                             "healthScore": runtime["runtime_health_score"],
+                            "healthLevel": runtime.get("health_level", "unknown"),
+                            "healthReason": runtime.get("health_reason", "unknown"),
+                            "cameraStatus": runtime.get("camera_status", "UNKNOWN"),
+                            "cameraStatusReason": runtime.get("camera_status_reason", "unknown"),
                             "inferenceStrideFrames": float(runtime["runtime_stride"]),
                             "inferenceScale": float(runtime["infer_scale"]),
                             "trackingQuality": runtime["tracking_quality"],
@@ -659,13 +1072,25 @@ def main() -> int:
                             "persons": per_camera_payload["persons"],
                             "roles": per_camera_payload["roles"],
                             "pipeline": camera_pipeline,
+                            "healthLevel": runtime.get("health_level", "unknown"),
+                            "healthReason": runtime.get("health_reason", "unknown"),
+                            "cameraStatus": runtime.get("camera_status", "UNKNOWN"),
+                            "cameraStatusReason": runtime.get("camera_status_reason", "unknown"),
+                            "blackFrameStreak": int(runtime.get("black_frame_streak", 0)),
+                            "reconnectAttempts": int(runtime.get("reconnect_attempts", 0)),
                         }
                     )
                 root_payload["cameras"] = camera_views
                 ws_bridge.publish(root_payload)
 
             if not args.no_display:
-                cv2.imshow("YOLO Pose Game Prototype", screen)
+                display_screen = _fit_for_display(
+                    screen,
+                    max_width=display_max_width,
+                    max_height=display_max_height,
+                    cv2=cv2,
+                )
+                cv2.imshow(window_name, display_screen)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     break
@@ -713,6 +1138,7 @@ def main() -> int:
                 "activeCameraId": active_camera_id,
                 "cameraCount": len(camera_runtime),
                 "framesProcessed": frame_count,
+                "runtime": dual_guard.snapshot(time.monotonic()),
                 "metrics": metrics,
             }
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

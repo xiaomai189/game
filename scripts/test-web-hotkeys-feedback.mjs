@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { request } from "node:http";
 import process from "node:process";
 import { chromium } from "playwright";
+import { startStaticServer } from "./static-server.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = 8080;
@@ -33,7 +33,7 @@ function assert(cond, msg) {
 }
 
 async function run() {
-  const server = spawn("python", ["-m", "http.server", String(PORT), "-d", "web"], { stdio: "ignore" });
+  const server = await startStaticServer({ host: HOST, port: PORT, rootDir: "web" });
   let browser;
   try {
     await waitForServer(BASE_URL, 7000);
@@ -104,7 +104,7 @@ async function run() {
     console.log("web hotkeys and feedback regression passed");
   } finally {
     if (browser) await browser.close();
-    if (server && !server.killed) server.kill("SIGTERM");
+    await server.close();
   }
 }
 

@@ -51,6 +51,8 @@ async function main() {
   await runShell("npm run test:web-input-mode-fallback");
   await runShell("npm run test:web-round-flow");
   await runShell("npm run test:web-hotkeys-feedback");
+  await runShell("npm run test:web-dual-race");
+  await runShell("npm run test:web-ws-reconnect-noise");
   await runShell("npm run test:web-visual-upgrade");
 }
 

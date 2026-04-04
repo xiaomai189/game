@@ -14,6 +14,8 @@
     "test:web-input-mode-fallback": "node scripts/test-web-input-mode-fallback.mjs",
     "test:web-round-flow": "node scripts/test-web-round-flow.mjs",
     "test:web-hotkeys-feedback": "node scripts/test-web-hotkeys-feedback.mjs",
+    "test:web-dual-race": "node scripts/test-web-dual-race.mjs",
+    "test:web-ws-reconnect-noise": "node scripts/test-web-ws-reconnect-noise.mjs",
     "test:web-visual-upgrade": "node scripts/test-web-visual-upgrade.mjs",
     "preflight": "node scripts/preflight.mjs"
   },

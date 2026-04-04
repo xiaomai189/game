@@ -81,10 +81,38 @@
               <option value="demo">Demo</option>
             </select>
           </label>
+          <label class="switch">
+            Mode
+            <select id="gameMode" aria-label="Game mode">
+              <option value="auto">Auto</option>
+              <option value="classic">Classic</option>
+              <option value="dual_race">Dual Race</option>
+            </select>
+          </label>
         </div>
         <div class="tips" id="tips">
           Start first. Left hand = left lane, right hand = right lane, neutral returns center.
           Keyboard fallback: Arrow Left/Right lane, Arrow Down squat shield, Enter/Space start-resume-restart, P pause/resume, R quick restart, F fullscreen.
+        </div>
+        <div class="camera-health-grid" id="cameraHealthGrid" aria-label="Camera runtime status">
+          <article class="camera-health-card" id="cameraCard0" data-status="unknown">
+            <header class="camera-health-head">
+              <span class="camera-health-name">cam0</span>
+              <span class="camera-health-dot" id="camera0Dot" aria-hidden="true"></span>
+            </header>
+            <div class="camera-health-line" id="camera0Status">status: UNKNOWN</div>
+            <div class="camera-health-line" id="camera0Reason">reason: waiting payload</div>
+            <div class="camera-health-line" id="camera0Reconnect">reconnects: 0 | black streak: 0</div>
+          </article>
+          <article class="camera-health-card" id="cameraCard1" data-status="unknown">
+            <header class="camera-health-head">
+              <span class="camera-health-name">cam1</span>
+              <span class="camera-health-dot" id="camera1Dot" aria-hidden="true"></span>
+            </header>
+            <div class="camera-health-line" id="camera1Status">status: UNKNOWN</div>
+            <div class="camera-health-line" id="camera1Reason">reason: waiting payload</div>
+            <div class="camera-health-line" id="camera1Reconnect">reconnects: 0 | black streak: 0</div>
+          </article>
         </div>
       </section>
 

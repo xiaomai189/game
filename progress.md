@@ -163,3 +163,40 @@ Original prompt: 目前我认为前端的游戏界面太丑，完全没有看到
 - classic 文本状态新增 `visual.inputMode`，`uiVariant` 升级为 `classic-pro-v36`。
 - 新增回归：`npm run test:web-input-mode-fallback`、`npm run test:web-round-flow` 并接入 `preflight`。
 - 验证通过：`npm run build`、`npm run test:web-input-mode-fallback`、`npm run test:web-round-flow`、`npm run preflight`。
+## 2026-04-04 v43 live verify + reconnect noise
+- Added `scripts/verify_live_dual_camera.py` to verify websocket `cameras[]` feed for required camera IDs.
+- Added `scripts/test-live-dual-camera.ps1` wrapper for Windows one-command validation.
+- Updated web transport UX in `web/game/index.js`:
+  - exponential reconnect backoff tuned to `1.5s -> 30s max`
+  - banner now exposes retry countdown and attempt
+  - `render_game_to_text()` now includes `transport` diagnostics
+- Added `scripts/test-web-ws-reconnect-noise.mjs` and wired into `preflight`.
+- Validation:
+  - `npm run test:web-ws-reconnect-noise` passed
+  - `npm run build` passed
+  - `npm run preflight` passed
+  - demo smoke for live-verify passed with `--required-cameras 0`
+
+## 2026-04-05 v48 camera status cards (in progress)
+- Added PRD: `docs/rpd/2026-04-05-0534-前端相机状态灯与重连计数-v48.md`.
+- Added HUD camera status cards in `web/index.html` for `cam0/cam1`.
+- Added card styles and status-color dots in `web/styles.css`.
+- Wired runtime camera fields in `web/game/index.js`:
+  - parse `cameraStatus/cameraStatusReason/reconnectAttempts/blackFrameStreak`
+  - keep `state.cameraRuntimeById`
+  - render cards in `updateHud`
+  - include `cameraStatus` summary in `render_game_to_text`.
+- Updated `scripts/test-web-dual-race.mjs` to assert camera status appears in text/UI.
+- Next: run build + playwright regression + capture evidence + write changelog.
+
+## 2026-04-05 v48 camera status cards (done)
+- Validation completed:
+  - `npm run build` passed
+  - `npm run test:web-dual-race` passed
+  - `python -m pytest -q` passed (40)
+- Evidence captured:
+  - `docs/evidence/2026-04-05/2026-04-05-0545-v48-camera-status-ui.png`
+  - `docs/evidence/2026-04-05/v48-playwright/`
+- Delivery docs:
+  - `docs/change-logs/2026-04-05/2026-04-05-0552-前端相机状态灯与重连计数-v48.md`
+  - `docs/evidence/2026-04-05/2026-04-05-0553-v48-前端相机状态卡证据.md`

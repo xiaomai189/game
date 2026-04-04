@@ -13,6 +13,12 @@ class CameraConfig:
     width: int = 1280
     height: int = 720
     mirror: bool = True
+    fps: int = 30
+    buffer_size: int = 1
+    fourcc: str = "MJPG"
+    validation_frames: int = 8
+    black_frame_mean_threshold: float = 8.0
+    black_frame_std_threshold: float = 2.0
 
 
 class CameraManager:
@@ -33,6 +39,26 @@ class CameraManager:
             return attempts
         return [("DEFAULT", None)]
 
+    def _is_valid_frame(self, frame: np.ndarray) -> bool:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean = float(gray.mean())
+        std = float(gray.std())
+        return (
+            mean >= float(self.config.black_frame_mean_threshold)
+            or std >= float(self.config.black_frame_std_threshold)
+        )
+
+    def _validate_capture_stream(self, cap: cv2.VideoCapture) -> bool:
+        target = max(1, int(self.config.validation_frames))
+        valid_count = 0
+        for _ in range(target):
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            if self._is_valid_frame(frame):
+                valid_count += 1
+        return valid_count >= max(1, target // 2)
+
     def open(self) -> None:
         source = self.config.source if self.config.source is not None else self.config.camera_index
         self._cap = None
@@ -42,9 +68,21 @@ class CameraManager:
             cap = cv2.VideoCapture(source) if backend is None else cv2.VideoCapture(source, backend)
             self.open_attempts.append(backend_name)
             if cap.isOpened():
-                self._cap = cap
-                self.last_backend_name = backend_name
-                break
+                if self.config.fourcc:
+                    fourcc_value = cv2.VideoWriter_fourcc(*self.config.fourcc[:4])
+                    cap.set(cv2.CAP_PROP_FOURCC, fourcc_value)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
+                if self.config.fps > 0:
+                    cap.set(cv2.CAP_PROP_FPS, self.config.fps)
+                if self.config.buffer_size > 0:
+                    # Keep capture latency bounded for action games.
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, self.config.buffer_size)
+
+                if self._validate_capture_stream(cap):
+                    self._cap = cap
+                    self.last_backend_name = backend_name
+                    break
             cap.release()
         if self._cap is None:
             tried = " -> ".join(self.open_attempts) if self.open_attempts else "none"
@@ -52,8 +90,6 @@ class CameraManager:
                 f"Cannot open camera source={source!r}. "
                 f"Tried backends: {tried}. Check device connection and permissions."
             )
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
 
     def read(self) -> tuple[bool, np.ndarray | None]:
         if self._cap is None:
@@ -65,6 +101,10 @@ class CameraManager:
         if self.config.mirror:
             frame = cv2.flip(frame, 1)
         return True, frame
+
+    def reopen(self) -> None:
+        self.release()
+        self.open()
 
     def release(self) -> None:
         if self._cap is not None:

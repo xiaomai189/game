@@ -51,6 +51,7 @@ def test_runtime_quality_controller_degrades_and_recovers() -> None:
     controller = RuntimeQualityController.create(
         base_inference_stride=1,
         min_scale=0.7,
+        initial_scale=1.0,
         max_stride=3,
         scale_step=0.1,
         low_health_threshold=58.0,

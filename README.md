@@ -179,3 +179,63 @@ npm run test:web-workout
 - Current playable web mode is `classic` only.
 - Backward compatibility:
   - `window.switch_workout_mode(...)` still exists but now maps to classic mode.
+
+## Dual Race (v42)
+- New mode: `dual_race` (split-screen, shared obstacle map).
+- Fixed mapping: `P1 = camera 0`, `P2 = camera 1`.
+- Round rule: wrong lane eliminates only that player; match ends when timer reaches 0; higher score wins.
+
+Quick start:
+```powershell
+.\.venv\Scripts\python.exe main.py --camera-sources "0,1"
+python -m http.server 8080 -d web
+```
+Open `http://127.0.0.1:8080`, set:
+- `Input = camera`
+- `Mode = Dual Race`
+
+One-click script now defaults to dual camera sources:
+```powershell
+.\scripts\run-oneclick.ps1
+```
+
+## Live Dual-Camera Verification (v43)
+- After backend is running, verify both cameras are actually present in websocket frames:
+
+```powershell
+.\scripts\test-live-dual-camera.ps1
+```
+
+- Optional parameters:
+
+```powershell
+.\scripts\test-live-dual-camera.ps1 -WsUrl "ws://127.0.0.1:8765" -RequiredCameras "0,1" -TimeoutSec 15 -MinFramesPerCamera 8
+```
+
+## Reconnect Diagnostics (v43)
+- Connection banner now shows reconnect countdown/attempt while camera stream is offline.
+- `window.get_transport_state()` is available for runtime diagnostics.
+- `window.render_game_to_text()` now includes `transport` diagnostics (`retryCount`, `retryInMs`, `socketState`, `lastError`).
+Optional override:
+```powershell
+.\scripts\run-oneclick.ps1 -CameraSources "0,1"
+```
+
+## Dual Runtime Guard (v44)
+- Startup self-check and runtime auto-degrade are enabled for dual-camera stability.
+- Auto mode enters `Dual Race` only when backend reports `runtime.dualReady=true`.
+- When dual stream is unhealthy, backend degrades to single-camera play and exposes reasons in diagnostics.
+
+New CLI overrides:
+```powershell
+python main.py --self-check-sec 8 --dual-min-fps 6 --max-input-age-ms 1200 --auto-degrade true
+```
+
+Key fields added to websocket payload:
+- `runtime.dualRequested`
+- `runtime.dualReady`
+- `runtime.selfCheckStatus`
+- `runtime.reason`
+- `runtime.degradedCameraIds`
+- `cameras[i].pipeline.healthLevel`
+- `cameras[i].pipeline.healthReason`
